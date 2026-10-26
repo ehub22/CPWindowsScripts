@@ -1,4 +1,20 @@
+# ============================================================================
+# authorizedusers.txt  -  every account that is ALLOWED to exist (from README)
+# ============================================================================
+# One user per line. Lines starting with # are ignored. Case does not matter.
+# Fill this in from the image README *after* copying the script folder into
+# the VM, and finish all Forensic Questions before deleting anyone.
+#
+# NEVER remove the four built-in accounts below - Windows needs them and the
+# script would try (and fail) to delete them. The script also always protects
+# the account you are currently signed in as and any account that a Windows
+# service signs in with.
+#
+# DELETE the EDIT_ME line once this file matches the README. The script
+# refuses to add / disable / delete users while EDIT_ME is present.
+EDIT_ME
 Administrator
 Guest
 DefaultAccount
 WDAGUtilityAccount
+# --- Add every authorized user from the README below this line ---

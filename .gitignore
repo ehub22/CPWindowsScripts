@@ -1,1 +1,9 @@
 *.code-workspace
+
+# Runtime output from secure.ps1 — contains live machine state from a VM.
+# Never commit or share these (competition material + account exports).
+Backups/
+Reports/
+Logs/
+.ai_prompt_acknowledged
+*.log

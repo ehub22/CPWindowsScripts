@@ -1,0 +1,39 @@
+# ============================================================================
+# prohibited_software.txt  -  installed programs the script should FLAG
+# ============================================================================
+# One name (or part of a name) per line. Matching is case-insensitive and
+# matches part of the installed program's display name. Lines starting with
+# # are ignored. EDIT THIS LIST FROM THE README: a program that is
+# prohibited on one image (e.g. a game on an office PC) may be required on
+# another (e.g. TeamViewer for the IT department). The script only REPORTS
+# matches and, if you confirm each one individually, launches that program's
+# own uninstaller. It never uninstalls anything silently or in bulk.
+Wireshark
+Nmap
+Cain & Abel
+John the Ripper
+Hashcat
+Ophcrack
+Metasploit
+Mimikatz
+Advanced IP Scanner
+Angry IP Scanner
+uTorrent
+BitTorrent
+qBittorrent
+FrostWire
+LimeWire
+CCleaner
+Keylogger
+Actual Keylogger
+TeamViewer
+AnyDesk
+LogMeIn
+TightVNC
+RealVNC
+UltraVNC
+Steam
+Epic Games
+Roblox
+Minecraft
+# --- Add anything the README prohibits below this line ---

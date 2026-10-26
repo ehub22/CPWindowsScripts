@@ -1,0 +1,33 @@
+# ============================================================================
+# keep_services.txt  -  CRITICAL SERVICES THAT MUST NEVER BE DISABLED
+# ============================================================================
+# EDIT THIS FILE FROM THE IMAGE README BEFORE RUNNING ANY SERVICE MODULE.
+#
+# Put ONE entry per line. Lines starting with # are ignored. Matching is
+# case-insensitive. You may use:
+#   * Windows service names      e.g.  TermService, W3SVC, DNS, Spooler
+#   * Windows display names      e.g.  Remote Desktop Services
+#   * Plain scenario words       e.g.  RDP, IIS, WEB, FTP, DNS, DHCP, AD,
+#                                      SMB, FILES, PRINT, SQL, APACHE,
+#                                      SSH, WINRM, EMAIL, SMTP, VPN
+# The script expands the plain words into every related Windows service and
+# will SKIP (never stop, disable, firewall-block or uninstall) anything that
+# matches. Extra entries cost nothing. Missing entries can cost points.
+#
+# The CyberPatriot Scoring Service, Windows Defender, Windows Firewall,
+# Windows Update, Event Log and your VM guest-tools services are ALWAYS
+# protected by the script itself - you do not need to list them here.
+#
+# DELETE the EDIT_ME line below once you have filled this file in from the
+# README. The script refuses to touch services while EDIT_ME is present.
+# If the README says there are NO critical services, delete EDIT_ME and
+# leave the rest of this file as comments only.
+EDIT_ME
+# --- Examples (remove the leading # to use them) ---
+#RDP
+#IIS
+#FTP
+#DNS
+#SMB
+#PRINT
+#SSH
