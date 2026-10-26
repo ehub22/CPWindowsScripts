@@ -56,9 +56,11 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] **Browsers & apps:** update Chrome/Firefox/Edge (Help → About), Notepad++ and any
       app the README names. Check `Reports\…\app-versions.txt`. Remove browser toolbars/
       extensions nobody can justify. **Never disable JavaScript** — the Scoring Report needs it.
-- [ ] **IIS/FTP/DNS/SQL that ARE critical:** the script protects the service, but you must
-      still harden *inside* it (FTP: no anonymous writes; IIS: directory browsing off,
-      remove sample sites; DNS: no open recursion/zone transfers to the world).
+- [ ] **IIS/FTP/DNS/DHCP/SMB/print/SSH/WinRM/SNMP/SQL that ARE critical:** Step 9C already
+      hardens them in place and protects everything they depend on; finish the inside jobs it
+      deliberately won't force (FTP: FTPS cert, no anonymous writes; IIS: remove sample
+      sites, per-site auth; DNS: recursion audience; SQL: sa/root passwords, xp_cmdshell;
+      SMTP: relay list; read `Reports\…\hardened-services.txt`).
 - [ ] **BitLocker:** do not enable it inside a timed VM without TPM/recovery planning.
       Policy settings are not worth a recovery lockout. Report-only is intentional.
 - [ ] **Credential Guard / VBS / Windows LAPS:** do not force-enable mid-round

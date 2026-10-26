@@ -48,7 +48,7 @@ same extraction by hand. Either way, **verify every line yourself** against the 
 | 6 | Security options (LSA/NTLMv2, UAC, logon, SMB signing…) + advanced audit policy & log sizes | Access Control, Login Policy, Misc | Role-aware (e.g. null-session pipes untouched on DCs) |
 | 7 | Defender: remove planted exclusions, enable cloud/PUA, ASR (3 Standard Protection rules Block, rest Audit), signatures, quick scan | Antivirus, Malware | Scoring-folder exclusions are **kept**; risky ASR/CFA stay in Audit |
 | 8 | Firewall: all profiles on, inbound Block, **outbound Allow**, logging; risky rules reported per-rule | Firewall | Never blocks outbound (scoring + updates); never bulk-deletes rules |
-| 9 | Insecure services, Remote Desktop (disable *or* secure-with-NLA), WinRM, SMBv1, LLMNR, NetBIOS, old TLS, hosts, shares | Insecure Services, File Sharing & Permissions | `keep_services.txt` + dependency checks + hard-coded protection for scoring/VM/core services |
+| 9 | Insecure services, Remote Desktop (disable *or* secure-with-NLA), WinRM, then **automatic hardening of every service that must stay** (9C: RDP extras, IIS/Apache, FTP, DNS, DHCP, SMB, print, SSH, WinRM, SNMP, AD/LDAP, databases), SMBv1, LLMNR, NetBIOS, old TLS, hosts, shares | Insecure Services, File Sharing & Permissions | `keep_services.txt` + **dependency shield** (every service a kept service needs is protected transitively and kept running; a candidate with running/auto-start/kept dependents is never disabled) + hard-coded protection for scoring/VM/core services; hardening never disables a kept service, changes its account, or forces certificate-based modes |
 | 10 | Users & groups from your lists (create/add/remove **with previews**) | User Policy | Never you, never built-ins, never the last admin, never domain users on a DC; Delete needs `DELETE` typed per account |
 | 11 | Prohibited software (report + per-app uninstaller) and media files (**quarantine**, never bulk-delete) | Policy Violations (files/services) | `C:\CP-Quarantine` is reversible until you choose otherwise |
 | 12 | Windows Update policy + scan/install option, app/browser version report; legacy 2018 GPOs (optional, role-picked, default skip) | Updates | Never auto-reboots; reboot is a timed, manual, tested decision |
@@ -72,7 +72,7 @@ Settings you may tune without editing code (defaults are the documented baseline
 
 | File | Contents |
 |---|---|
-| `keep_services.txt` | Critical services to **never** disable — service names, display names, or plain words (`RDP`, `IIS`, `FTP`, `DNS`, `SMB`, `PRINT`, `SQL`, `SSH`, …). One per line. |
+| `keep_services.txt` | Critical services to **never** disable — and to **harden automatically in place** (Step 9C) — service names, display names, or plain words (`RDP`, `IIS`, `FTP`, `DNS`, `SMB`, `PRINT`, `SQL`/`DATABASE`, `SSH`, `WEBDAV`, `ANONYMOUSFTP` only if anonymous FTP is required, …). One per line. Whatever they depend on is protected too. |
 | `authorizedusers.txt` | Every account allowed to exist. Keep the 4 built-ins. |
 | `admins.txt` | Everyone allowed in **Administrators**. Keep `Administrator`. |
 | `rdpusers.txt` | Non-admins allowed in **Remote Desktop Users** (only if RDP is critical). |
@@ -89,6 +89,12 @@ the script would rather do nothing than guess at your scenario.
   signed in as, built-in accounts, and any account a service signs in with.
 - On a **domain controller**, domain users are report-only and AD/DNS/Kerberos/Netlogon/
   SYSVOL are protected; password policy warns that the real control is the Default Domain Policy.
+- **Dependencies are never removed:** a service is only disabled if it is not needed by any
+  kept/protected service (checked transitively) and nothing that depends on it is running,
+  set to auto-start, or kept; stops are graceful (never force-cascaded), a failed stop leaves
+  the startup type untouched, and services are never deleted. Disabled *dependencies* of a
+  critical service are repaired to Manual so the critical service can always start, and the
+  final verification FAILs loudly if any critical service — or anything it depends on — is down.
 - No bulk anything: services stop only after dependency + keep-list checks; users delete only
   per-account with a typed confirmation; shares, firewall rules and uninstalls are per-item;
   media files are *moved to quarantine*, not deleted.

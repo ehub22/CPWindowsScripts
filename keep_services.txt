@@ -14,6 +14,20 @@
 # will SKIP (never stop, disable, firewall-block or uninstall) anything that
 # matches. Extra entries cost nothing. Missing entries can cost points.
 #
+# LISTED SERVICES ARE ALSO HARDENED AUTOMATICALLY (step 9C): services meant
+# to stay get extra, service-specific hardening - Remote Desktop session /
+# redirection options, IIS directory browsing + logging, FTP anonymous-auth,
+# DNS zone-transfer restrictions, DHCP audit logging, SMB auditing, print
+# driver restrictions (PrintNightmare), sshd_config, WinRM Basic-auth,
+# SNMP community rights, and more - and they are made sure RUNNING.
+# DEPENDENCIES ARE NEVER REMOVED: every service a listed service depends on
+# (directly or indirectly) is protected too, and nothing is disabled while a
+# running/auto-start/kept service depends on it.
+#
+# Two words have special meaning for hardening - use them ONLY if the README
+# says so:  ANONYMOUSFTP = anonymous/public FTP logons must stay allowed;
+# WEBDAV = IIS WebDAV publishing is required.
+#
 # The CyberPatriot Scoring Service, Windows Defender, Windows Firewall,
 # Windows Update, Event Log and your VM guest-tools services are ALWAYS
 # protected by the script itself - you do not need to list them here.
