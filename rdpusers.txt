@@ -1,0 +1,12 @@
+# ============================================================================
+# rdpusers.txt  -  users allowed in the "Remote Desktop Users" group
+# ============================================================================
+# ONLY used when the README says Remote Desktop is a critical service and you
+# choose to SECURE (not disable) Remote Desktop. One user per line. Lines
+# starting with # are ignored. Case does not matter.
+#
+# Administrators can always use Remote Desktop and do not need to be listed.
+# Leave this file with comments only if nobody extra needs Remote Desktop.
+# DELETE the EDIT_ME line once this file matches the README.
+EDIT_ME
+# --- Add authorized Remote Desktop users from the README below this line ---

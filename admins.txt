@@ -1,1 +1,13 @@
+# ============================================================================
+# admins.txt  -  every user allowed to be in the Administrators group (README)
+# ============================================================================
+# One user per line. Lines starting with # are ignored. Case does not matter.
+# NEVER remove the built-in Administrator line below. The script also always
+# protects the account you are currently signed in as, and will never remove
+# the last remaining administrator.
+#
+# DELETE the EDIT_ME line once this file matches the README. The script
+# refuses to change group membership while EDIT_ME is present.
+EDIT_ME
 Administrator
+# --- Add every authorized administrator from the README below this line ---
