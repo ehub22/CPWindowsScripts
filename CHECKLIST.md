@@ -53,8 +53,10 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] **Domain controllers:** set domain password/lockout policy in the *Default Domain
       Policy* GPO (`gpmc.msc`) — local policy alone may not score. Review AD users,
       Domain Admins / Enterprise Admins, DNS zones, and DHCP scopes against the README.
-- [ ] **Browsers & apps:** update Chrome/Firefox/Edge (Help → About), Notepad++ and any
-      app the README names. Check `Reports\…\app-versions.txt`. Remove browser toolbars/
+- [ ] **Browsers & apps:** Step 12A auto-checks/updates the curated WinGet set; still update
+      any app the README specifically names from Help → About, and **normally close/reopen
+      browsers after their updates** (running copies keep the old version). Check
+      `Reports\…\app-updates.txt` and `app-versions.txt`. Remove browser toolbars/
       extensions nobody can justify. **Never disable JavaScript** — the Scoring Report needs it.
 - [ ] **IIS/FTP/DNS/DHCP/SMB/print/SSH/WinRM/SNMP/SQL that ARE critical:** Step 9C already
       hardens them in place and protects everything they depend on; finish the inside jobs it

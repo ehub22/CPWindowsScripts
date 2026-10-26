@@ -2889,6 +2889,34 @@ function Invoke-Updates {
     Set-RegValue 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 0 'DWord' ''
     Set-RegValue 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'ElevateNonAdmins' 0 'DWord' 'Only administrators approve updates'
     Set-RegValue 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update' 'AUOptions' 4 'DWord' ''
+    # Receive security/quality updates for other Microsoft products too (for
+    # example MSI-based Office). This is Microsoft's documented ServiceManager
+    # opt-in. It is skipped when a WSUS policy says this machine is centrally
+    # managed, and it never forces an update or a reboot by itself.
+    try {
+        $muId = '7971f918-a847-4430-9279-4a52d1efe18d'
+        $useWUServer = Get-RegValue 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'UseWUServer'
+        $muManager = New-Object -ComObject 'Microsoft.Update.ServiceManager'
+        $muRegistered = $false
+        foreach ($updateService in $muManager.Services) {
+            try {
+                if ($updateService.ServiceID -ieq $muId -and [bool]$updateService.IsRegisteredWithAU) { $muRegistered = $true }
+            } catch {}
+        }
+        if ("$useWUServer" -eq '1') {
+            Write-Step 'Microsoft Update opt-in skipped: WSUS policy manages this machine.'
+        } elseif ($muRegistered) {
+            Write-Step 'Microsoft Update (updates for other Microsoft products) is already enabled.'
+        } elseif ($script:AuditOnly) {
+            Write-Host '[AUDIT] Would enable Microsoft Update for other Microsoft products (documented ServiceManager opt-in).'
+        } elseif (Ask-YesNo 'Enable Microsoft Update so Windows Update also patches other Microsoft products (for example MSI-based Office)? No reboot is triggered.' $true) {
+            try {
+                $muManager.ClientApplicationID = 'CPWindowsScripts'
+                [void]$muManager.AddService2($muId, 7, '')
+                Write-Good 'Microsoft Update enabled for other Microsoft products.'
+            } catch { Write-WarnLine ("Microsoft Update opt-in failed: " + $_.Exception.Message) }
+        }
+    } catch { Write-WarnLine 'Could not check Microsoft Update registration; Windows Update settings are unchanged.' }
     if (-not $script:AuditOnly) {
         foreach ($svcName in @('wuauserv','BITS','UsoSvc')) {
             try {
@@ -2935,28 +2963,193 @@ function Invoke-Updates {
             }
         }
     }
-    # Browser / app versions for the manual update checklist.
-    $browserInfo = @()
+    # Office Click-to-Run has its own supported update task. Repair/start
+    # that task rather than calling OfficeC2RClient.exe switches, which
+    # Microsoft does not support for automation. Starting the task checks
+    # and stages updates; it does not force-close Office applications.
+    try {
+        $officeTask = $null
+        try { $officeTask = Get-ScheduledTask -TaskPath '\Microsoft\Office\' -TaskName 'Office Automatic Updates 2.0' -ErrorAction Stop } catch {}
+        $officeSvc = Get-Service -Name 'ClickToRunSvc' -ErrorAction SilentlyContinue
+        if ($null -ne $officeTask -or $null -ne $officeSvc) {
+            $officePolicy = 'HKLM\SOFTWARE\Policies\Microsoft\Office\16.0\common\OfficeUpdate'
+            $officeAuto = Get-RegValue $officePolicy 'EnableAutomaticUpdates'
+            if ("$officeAuto" -eq '0') {
+                Set-RegValue $officePolicy 'EnableAutomaticUpdates' 1 'DWord' 'Re-enable automatic Office updates'
+            }
+            if ($null -ne $officeSvc -and $officeSvc.StartType -eq 'Disabled') {
+                if ($script:AuditOnly) { Write-Host '[AUDIT] Office ClickToRunSvc is Disabled - would set it to Manual so the Office update task can run.' }
+                else {
+                    try {
+                        Set-Service -Name 'ClickToRunSvc' -StartupType Manual -ErrorAction Stop
+                        Write-Good 'Office ClickToRunSvc was Disabled; set to Manual for Office updates.'
+                    } catch { Write-WarnLine ("Could not repair ClickToRunSvc: " + $_.Exception.Message) }
+                }
+            }
+            if ($null -ne $officeTask) {
+                if ($officeTask.State -eq 'Disabled') {
+                    if ($script:AuditOnly) { Write-Host '[AUDIT] Office Automatic Updates 2.0 task is Disabled - would enable it.' }
+                    else {
+                        try {
+                            Enable-ScheduledTask -TaskPath '\Microsoft\Office\' -TaskName 'Office Automatic Updates 2.0' -ErrorAction Stop | Out-Null
+                            Write-Good 'Office Automatic Updates 2.0 scheduled task enabled.'
+                            $officeTask = Get-ScheduledTask -TaskPath '\Microsoft\Office\' -TaskName 'Office Automatic Updates 2.0' -ErrorAction SilentlyContinue
+                        } catch { Write-WarnLine ("Could not enable the Office update task: " + $_.Exception.Message) }
+                    }
+                }
+                if ($script:AuditOnly) {
+                    Write-Host '[AUDIT] Would start the supported Office Automatic Updates 2.0 task.'
+                } elseif ($null -ne $officeTask -and $officeTask.State -eq 'Running') {
+                    Write-Step 'Office Automatic Updates 2.0 is already running.'
+                } elseif (Ask-YesNo 'Start the supported Office Automatic Updates 2.0 check now? It stages updates without force-closing Office.' $true) {
+                    try {
+                        Start-ScheduledTask -TaskPath '\Microsoft\Office\' -TaskName 'Office Automatic Updates 2.0' -ErrorAction Stop
+                        Write-Good 'Office Automatic Updates 2.0 started; close and reopen Office apps when convenient to finish applying updates.'
+                    } catch { Write-WarnLine ("Could not start the Office update task: " + $_.Exception.Message) }
+                }
+            }
+        }
+    } catch { Write-WarnLine 'Office update task check stopped safely; update Office from File > Account > Update Options.' }
+
+    # Vendor updaters must not be left Disabled. Repair only those services
+    # that actually exist, and do not force-start them: WinGet below performs
+    # the immediate update, while these services keep future updates working.
+    foreach ($updater in @(
+        @{ Name='gupdate'; Target='Automatic'; Product='Google Chrome' },
+        @{ Name='gupdatem'; Target='Manual'; Product='Google Chrome' },
+        @{ Name='edgeupdate'; Target='Automatic'; Product='Microsoft Edge' },
+        @{ Name='edgeupdatem'; Target='Manual'; Product='Microsoft Edge' },
+        @{ Name='MozillaMaintenance'; Target='Manual'; Product='Mozilla Firefox' },
+        @{ Name='AdobeARMservice'; Target='Automatic'; Product='Adobe Acrobat/Reader' }
+    )) {
+        $updaterSvc = Get-Service -Name $updater.Name -ErrorAction SilentlyContinue
+        if ($null -eq $updaterSvc -or $updaterSvc.StartType -ne 'Disabled') { continue }
+        if ($script:AuditOnly) {
+            Write-Host ("[AUDIT] " + $updater.Product + " updater service " + $updater.Name + " is Disabled - would set it to " + $updater.Target + ".")
+        } else {
+            try {
+                Set-Service -Name $updater.Name -StartupType $updater.Target -ErrorAction Stop
+                Write-Good ($updater.Product + " updater service repaired: " + $updater.Name + " set to " + $updater.Target + ".")
+            } catch { Write-WarnLine ("Could not repair updater service " + $updater.Name + ": " + $_.Exception.Message) }
+        }
+    }
+
+    # Curated WinGet upgrades for common, frequently-updated user apps. The
+    # list is intentionally narrow: exact package ID, winget source only,
+    # silent upgrade, agreements accepted, no --force, and no --allow-reboot.
+    $appCandidates = @(
+        @{ Id='Google.Chrome'; Label='Google Chrome'; Path=("$env:ProgramFiles\Google\Chrome\Application\chrome.exe") },
+        @{ Id='Mozilla.Firefox'; Label='Mozilla Firefox'; Path=("$env:ProgramFiles\Mozilla Firefox\firefox.exe") },
+        @{ Id='Microsoft.Edge'; Label='Microsoft Edge'; Path=("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") },
+        @{ Id='Notepad++.Notepad++'; Label='Notepad++'; Path=("$env:ProgramFiles\Notepad++\notepad++.exe") },
+        @{ Id='Adobe.Acrobat.Reader.64-bit'; Label='Adobe Acrobat Reader'; Path=("$env:ProgramFiles\Adobe\Acrobat DC\Acrobat\Acrobat.exe") },
+        @{ Id='VideoLAN.VLC'; Label='VLC media player'; Path=("$env:ProgramFiles\VideoLAN\VLC\vlc.exe") },
+        @{ Id='7zip.7zip'; Label='7-Zip'; Path=("$env:ProgramFiles\7-Zip\7zFM.exe") }
+    )
+    $prohibitedForUpdates = @()
+    try { $prohibitedForUpdates = @(Get-TextList (Join-Path $script:Root 'prohibited_software.txt') | Where-Object { $_ -ne 'EDIT_ME' }) } catch {}
+    $appsToUpdate = @()
+    if ($script:AuditOnly) {
+        foreach ($app in $appCandidates) {
+            $installedPath = $false
+            if ($app.Path -and (Test-Path $app.Path)) { $installedPath = $true }
+            if ($app.Id -eq 'Google.Chrome' -and (Test-Path ("${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"))) { $installedPath = $true }
+            if ($app.Id -eq 'Mozilla.Firefox' -and (Test-Path ("${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"))) { $installedPath = $true }
+            if ($app.Id -eq 'Microsoft.Edge' -and (Test-Path ("$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"))) { $installedPath = $true }
+            if ($installedPath) { Write-Host ("[AUDIT] Would check WinGet for an upgrade to " + $app.Label + " (" + $app.Id + ").") }
+        }
+    } elseif (Test-CommandExists 'winget') {
+        Write-Step 'Checking WinGet for upgrades to common browsers/apps (this can take a minute)...'
+        $paidAcrobatDetected = $false
+        try {
+            foreach ($installed in @(Get-InstalledPrograms)) {
+                if ("$($installed.DisplayName)" -match 'Adobe Acrobat' -and "$($installed.DisplayName)" -notmatch 'Reader') { $paidAcrobatDetected = $true }
+            }
+        } catch {}
+        foreach ($app in $appCandidates) {
+            if ($app.Id -eq 'Adobe.Acrobat.Reader.64-bit' -and $paidAcrobatDetected) {
+                Write-WarnLine 'A non-Reader Adobe Acrobat edition was detected. The WinGet Reader package is skipped to avoid an edition/product-code mismatch; update Acrobat from Help > Check for Updates (its updater service was repaired above if needed).'
+                continue
+            }
+            $skipForProhibited = $false
+            foreach ($bad in $prohibitedForUpdates) {
+                $badText = ([string]$bad).Trim()
+                if ($badText.Length -ge 3 -and ($app.Label.ToLower().Contains($badText.ToLower()) -or $app.Id.ToLower().Contains($badText.ToLower()))) { $skipForProhibited = $true }
+            }
+            if ($skipForProhibited) {
+                Write-Step ("Not updating " + $app.Label + ": it matches prohibited_software.txt, so removal/manual review comes first.")
+                continue
+            }
+            try {
+                $listOutput = @(& winget list --id $app.Id --exact --upgrade-available --source winget --accept-source-agreements 2>$null)
+                $listCode = $LASTEXITCODE
+                $listText = ($listOutput | Out-String)
+                if ($listCode -eq 0 -and $listText -match [regex]::Escape($app.Id)) {
+                    $appsToUpdate += $app
+                    Write-Step ("Upgrade available: " + $app.Label + " (" + $app.Id + ")")
+                    Add-Report 'app-updates.txt' ("WinGet upgrade available: " + $app.Label) $listText
+                }
+            } catch { Write-WarnLine ("WinGet could not check " + $app.Label + ": " + $_.Exception.Message) }
+        }
+        if ($appsToUpdate.Count -eq 0) {
+            Write-Step 'WinGet found no upgrades for the curated common-app list (or those apps are not installed).'
+        } elseif (Ask-YesNo ("Update these app(s) now with WinGet: " + (($appsToUpdate | Select-Object -ExpandProperty Label) -join ', ') + "? Updates are silent and reboot is not allowed; browsers still need a normal close/reopen afterwards.") $true) {
+            foreach ($app in $appsToUpdate) {
+                Write-Step ("Updating " + $app.Label + " (" + $app.Id + ")...")
+                try {
+                    & winget upgrade --id $app.Id --exact --source winget --silent --accept-source-agreements --accept-package-agreements
+                    $upgradeCode = $LASTEXITCODE
+                    if ($upgradeCode -eq 0) {
+                        Write-Good ("Updated with WinGet: " + $app.Label)
+                    } elseif ($upgradeCode -eq 3010) {
+                        Write-Good ("Updated with WinGet: " + $app.Label + " (reboot pending; reboot only when YOU choose, late in the round)")
+                    } elseif ($upgradeCode -eq -1978335189 -or $upgradeCode -eq 2316632107) {
+                        Write-Step ($app.Label + " is already current according to WinGet.")
+                    } elseif ($upgradeCode -eq 1641) {
+                        Write-WarnLine ($app.Label + " installer reported that it initiated a reboot. Save work now; this script did not pass --allow-reboot.")
+                    } else {
+                        Write-WarnLine ("WinGet update for " + $app.Label + " returned exit code " + $upgradeCode + ". Update it from the app's Help > About screen instead.")
+                    }
+                } catch { Write-WarnLine ("WinGet update failed for " + $app.Label + ": " + $_.Exception.Message) }
+            }
+            Write-WarnLine 'After app updates, normally close and reopen updated browsers/apps when convenient (especially before final scoring checks). This script never force-closes them.'
+        }
+        if (Ask-YesNo 'ALSO run a BULK WinGet upgrade for every other upgradable app? This can change scenario software, runtimes, servers and tools. Choose Yes only if the README allows every installed app to change.' $false) {
+            try {
+                & winget upgrade --all --source winget --silent --accept-source-agreements --accept-package-agreements
+                $allCode = $LASTEXITCODE
+                if ($allCode -eq 0) { Write-Good 'Bulk WinGet upgrade finished.' }
+                elseif ($allCode -eq 3010) { Write-Good 'Bulk WinGet upgrade finished; a reboot is pending and remains your choice.' }
+                elseif ($allCode -eq -1978335189 -or $allCode -eq 2316632107) { Write-Step 'Bulk WinGet check found nothing else applicable to upgrade.' }
+                else { Write-WarnLine ("Bulk WinGet upgrade returned exit code " + $allCode + ". Review the app-update output above and re-check critical services/apps.") }
+                Write-WarnLine 'Bulk upgrade selected: immediately re-test every critical service and scenario application, then refresh the Scoring Report.'
+            } catch { Write-WarnLine ("Bulk WinGet upgrade failed: " + $_.Exception.Message) }
+        }
+    } elseif (-not $script:AuditOnly) {
+        Write-WarnLine 'WinGet is not available, so common apps were not auto-updated. Update browsers/editors from Help > About instead.'
+    }
+
+    # Final app-version snapshot (after any updates above).
+    $appVersionInfo = @()
     foreach ($candidate in @(
         "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
         "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
         "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
         "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe",
-        "$env:ProgramFiles\Notepad++\notepad++.exe"
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+        "$env:ProgramFiles\Notepad++\notepad++.exe",
+        "$env:ProgramFiles\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
+        "$env:ProgramFiles\VideoLAN\VLC\vlc.exe",
+        "$env:ProgramFiles\7-Zip\7zFM.exe"
     )) {
         if ($candidate -and (Test-Path $candidate)) {
-            try { $browserInfo += ($candidate + '  version ' + (Get-Item $candidate).VersionInfo.FileVersion) } catch {}
+            try { $appVersionInfo += ($candidate + '  version ' + (Get-Item $candidate).VersionInfo.FileVersion) } catch {}
         }
     }
-    if ($browserInfo.Count -gt 0) {
-        Add-Report 'app-versions.txt' 'Browser/editor versions (update these apps from their own Help > About menus)' ($browserInfo -join "`r`n")
-        Write-Step 'Browser/editor versions recorded in the Reports folder (updates for these are scored too).'
-    }
-    if ((Test-CommandExists 'winget') -and -not $script:AuditOnly) {
-        Write-Step 'winget is available for REPORTING outdated apps:'
-        try { & winget upgrade --accept-source-agreements 2>$null | Out-String | Write-Host } catch {}
-        Write-Step 'winget bulk-upgrade is NOT run automatically: upgrading a required app'
-        Write-Step 'mid-round can break the scenario. Update browsers first, by hand.'
+    if ($appVersionInfo.Count -gt 0) {
+        Add-Report 'app-versions.txt' 'Browser/common-app versions after update step' ($appVersionInfo -join "`r`n")
+        Write-Step 'Browser/common-app versions recorded in the Reports folder.'
     }
 }
 
