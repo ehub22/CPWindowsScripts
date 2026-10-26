@@ -75,6 +75,10 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] **Per-user settings** (screensaver lock/timeout, Office macro policy, browser
       settings for *other* users): set via `gpedit.msc` User Configuration when the
       README points at user behavior; machine policy can't cover every profile.
+- [ ] **Running malware/backdoors:** check Step 7B's `suspicious-processes.csv` and
+      Defender Protection history. The script only directly stops evidence-backed,
+      non-service processes under its thresholds; finish the job by removing the
+      matching persistence (service/task/Run/WMI/startup entry) one item at a time.
 - [ ] **Persistence sweep by eye:** walk `recon.txt` — unknown listening ports,
       scheduled-task *actions*, Run/RunOnce values, Startup folders, IFEO `Debugger`
       values (Sticky-Keys backdoor), `Winlogon Shell/Userinit`, WMI subscriptions,
