@@ -41,13 +41,6 @@ From the CP-18 Rules Book scoring/penalty sections and years of round instructio
   coaches, mentors or team assistants; teams from the same school may not collaborate on
   or share scripts; pre-written scripts are prohibited at **National Finals**.
   (CP-18 §3011.4; carried forward in CP-19 coverage.)
-- **AI:** CP-19 §3010.4, as reported by multiple 2026 season sources, prohibits AI tools
-  (including chatbots and AI-generated scripts) **during competition rounds** and paid AI
-  products in connection with the competition at any time; free AI tools remain usable
-  for **training outside rounds**. This is why the Step-0 AI paragraph in this repo is
-  labelled training-only and has a manual equivalent. **Verify against the signed Rules
-  Book for your season** — this document summarizes secondary reporting where the CP-19
-  book itself was not publicly fetchable.
 - **Sharing:** publicly posting/distributing scripts or resources created for CyberPatriot
   is prohibited (§3011.5 family). Keep your team's operational copy private.
 - **Outside assistance / staging** (§3010–3011): no outside advice during rounds, no
@@ -218,7 +211,7 @@ tells the human exactly where to look instead.
 - CyberPatriot 18 Rules Book (FINAL, Change 2) — uscyberpatriot.org (scoring/penalties,
   §3009–3014 resources/scripts/assistance, §4002–4003).
 - CyberPatriot 19 competition timeline & challenges — uscyberpatriot.org; 2026 season
-  coverage summarising CP-19 §3010.4 (AI) / §3011.5 (publication ban), e.g.
+  coverage summarising CP-19 §3011.5 (publication ban), e.g.
   hackerdna.com "CyberPatriot Guide 2026".
 - Microsoft, *Security baseline for Windows Server 2025* (v2506 Jun 2025; v2602 Feb 2026)
   — Tech Community / Security Compliance Toolkit download (details?id=55319): lockout

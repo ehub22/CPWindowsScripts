@@ -8,7 +8,7 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] Coach has the Unique Identifier(s) printed/screenshotted; checksums verified.
 - [ ] Host meets current CyberPatriot Technical Specifications; VM player is the required one.
 - [ ] You have rehearsed this runbook on a **practice image of the same OS** at least once.
-- [ ] You have read the **current Rules Book** sections on resources/scripts/AI/outside help.
+- [ ] You have read the **current Rules Book** sections on resources/scripts/outside help.
 - [ ] Backup internet plan (hotspot) and a paper copy of this checklist.
 
 ## First 15 minutes on the image (change NOTHING yet)
@@ -20,8 +20,8 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] Open **every Forensic Question file**. Answer them now; note any you must research
       *before* hardening (file contents, hashes, user activity, deleted-file questions).
 - [ ] Fill in `keep_services.txt`, `authorizedusers.txt`, `admins.txt`, `rdpusers.txt`
-      from the README; delete each `EDIT_ME` line. (Training: the `AI_PROMPT.txt`
-      paragraph + README produces these lists — then verify them by eye, line by line.)
+      from the README; delete each `EDIT_ME` line. The `AI_PROMPT.txt`
+      paragraph can help generate these lists — verify them by eye, line by line.
 - [ ] Optional but smart: `secure.bat -Mode Audit` and skim `Reports\…\recon.txt` —
       listeners, Run keys, scheduled tasks and IFEO debuggers often *answer* forensics.
 - [ ] Start **Settings → Windows Update → Check for updates** in the background now.

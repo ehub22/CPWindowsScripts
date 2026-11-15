@@ -12,6 +12,8 @@ color 0b
 title CyberPatriot Windows Script (2026)
 setlocal
 cd /d "%~dp0"
+set "UNATTENDED="
+for %%A in (%*) do if /I "%%~A"=="ApplySafe" set "UNATTENDED=1"
 
 if not exist "%~dp0.ai_prompt_acknowledged" goto :showprompt
 goto :launch
@@ -25,20 +27,17 @@ echo   below is a prompt for an AI model: copy it, paste the image README
 echo   right after it, put the result into keep_services.txt (and the user
 echo   lists), then VERIFY every line yourself against the original README.
 echo.
-echo   RULES WARNING: current CyberPatriot rules restrict AI tools during
-echo   scored rounds. Use this prompt for TRAINING / practice images only;
-echo   in a scored round fill in the same .txt files by hand from the README.
-echo.
 echo ------------------------- COPY FROM HERE -------------------------
 type "%~dp0AI_PROMPT.txt"
 echo ------------------------- COPY TO HERE ---------------------------
 echo.
 echo %DATE% %TIME% > "%~dp0.ai_prompt_acknowledged"
-pause
+if not defined UNATTENDED pause
 
 :launch
 echo Starting secure.ps1 ...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0secure.ps1" %*
+set "EXITCODE=%ERRORLEVEL%"
 echo.
-pause
-endlocal
+if not defined UNATTENDED pause
+endlocal & exit /b %EXITCODE%

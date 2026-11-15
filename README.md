@@ -1,19 +1,10 @@
 # CyberPatriot Windows Hardening — 2026 Edition
 
 Hardening for **Windows 10 / 11** and **Windows Server 2019 / 2022 / 2025** CyberPatriot
-training images. Rebuilt from the 2019 Sharon High School script (teams 14-3178 / 15-3557)
-around one rule: **gain points without ever risking points** — audit first, back up always,
-protect whatever the scenario needs, and never reboot automatically.
-
-> ## ⚠️ Read the current Rules Book before any scored round
-> CyberPatriot rules change every season. Recent rules restrict **AI tools and AI-made
-> scripts during competition rounds** (CP-19 §3010.4 as reported in 2026 season coverage),
-> ban publicly posting CyberPatriot resources (§3011.5), allow only scripts created by
-> **your own team's competitors**, and prohibit pre-written scripts at National Finals.
-> **Treat this repository as training material**: understand every line, test it on
-> practice/training images, and re-author what your team uses so it complies with the
-> rules in force for your season. When in doubt, ask your coach — a disqualification
-> costs more than any single image is worth.
+images. Rebuilt from the 2019 Sharon High School script (teams 14-3178 / 15-3557)
+around one rule: **reduce risk while gaining points** — audit first, back up always,
+protect whatever the scenario needs, and never reboot automatically. No script can
+guarantee a score or eliminate all risk.
 
 ## The 30-second version
 
@@ -23,25 +14,24 @@ protect whatever the scenario needs, and never reboot automatically.
 3. Read the README on the image desktop. Fill in, from that README:
      keep_services.txt      authorizedusers.txt      admins.txt      rdpusers.txt
    ...and delete the EDIT_ME line in each file you finish.
-4. secure.bat -Mode Audit      (read-only dry-run + reports — changes nothing)
+4. secure.bat -Mode Audit      (system audit; writes local reports and logs)
 5. secure.bat                  (interactive hardening, step by step)
 6. Work CHECKLIST.md, watch the Scoring Report, use -Rollback if a change costs points.
 ```
 
 **First run only**, `secure.bat` prints the paragraph in [`AI_PROMPT.txt`](AI_PROMPT.txt)
 before anything else: paste it into an AI model, paste the image README immediately after
-it, and it will list every critical/necessary service that must **not** be disabled (with
+it, to request critical/necessary services that must **not** be disabled (with
 Windows service names, ports and dependencies) plus paste-ready contents for the four
-`.txt` files. **Training use** — see the rules warning above; in a scored round do the
-same extraction by hand. Either way, **verify every line yourself** against the README.
+`.txt` files. **Verify every line yourself** against the README.
 
 ## What it does, in run order
 
 | Step | Module | Scoring categories it targets | Point-safety |
 |---|---|---|---|
-| 0 | Critical-services AI paragraph + rules warning | — (prevents penalties) | Prints once per fresh folder copy |
-| 1 | Preflight: OS/role detection, forensics gate, README-file gate | — | Refuses destructive modules until gates pass |
-| 2 | Backup: secedit, auditpol, firewall, services, registry, hosts, LGPO `/b` | — | Everything is restorable via `-Rollback` |
+| 0 | Critical-services AI paragraph | — (scenario preparation) | Prints once per fresh folder copy |
+| 1 | Preflight: OS/role detection, forensics gate, README-file gate | — | Apply modes stop until required gates pass |
+| 2 | Backup: secedit, auditpol, firewall, services, selected registry keys, hosts, LGPO `/b` | — | Stops if core exports fail; recovery is partial |
 | 3 | Recon reports: users/groups, shares, listeners, services, persistence (Run keys, tasks, IFEO debuggers, Winlogon, hosts, DNS, WMI), software | Malware, Misc, hints for Forensics | Read-only always |
 | 4 | Passwords: one strong team-chosen password (never hard-coded) | User Policy, Password Policy | Skips you, built-ins, service-logon accounts; runs *before* password-age policy |
 | 5 | Password + lockout policy (14 / 24 / 60d / 1d / 5·15·15) + conservative User Rights | Password Policy, Login Policy, Access Control | CIS/Microsoft-baseline values; lockout set *after* password changes |
@@ -58,15 +48,18 @@ same extraction by hand. Either way, **verify every line yourself** against the 
 
 | Command | Effect |
 |---|---|
-| `secure.bat -Mode Audit` | **Dry-run.** Every module reports what it *would* change; writes `Reports\…`; changes nothing. Safe before forensics. |
+| `secure.bat -Mode Audit` | **Dry-run.** Reports system state and proposed changes; writes local reports, logs and a prompt marker, but does not harden system settings. |
 | `secure.bat` | Interactive (normal). Each module and each risky item asks first. Defaults are the safe/scoring choice. |
-| `secure.bat -Mode ApplySafe -ForensicsDone -ReadmeConfigured` | Unattended-safe subset for *practice reruns only*. Refuses to start without both gate switches; judgment-call items are kept, not guessed. |
+| `secure.bat -Mode ApplySafe -ForensicsDone -ReadmeConfigured` | Unattended-safe subset for *practice reruns only*. Refuses to start without both gate switches; passwords, account/group changes and share changes require an interactive run. |
 | `secure.bat -Rollback` | Restore the newest backup (policy, audit, firewall, service start-types, registry exports, hosts). |
-| `secure.ps1 -ShowAIPrompt` | Show the Step-0 AI paragraph again. |
+| `secure.ps1 -ShowAIPrompt` | Show the Step-0 AI paragraph again, then continue with the selected mode. |
 
 Settings you may tune without editing code (defaults are the documented baseline values):
 `-MinPasswordLength`, `-PasswordHistorySize`, `-MaxPasswordAgeDays`, `-MinPasswordAgeDays`,
 `-LockoutThreshold`, `-LockoutDurationMin`, `-LockoutResetMin`.
+
+Run the non-destructive regression checks on Windows with
+`powershell.exe -NoProfile -File tests\regression.ps1`. They do not replace VM testing.
 
 ## Configuration files (fill in from the image README)
 
@@ -79,10 +72,12 @@ Settings you may tune without editing code (defaults are the documented baseline
 | `prohibited_software.txt` | Name fragments to flag in installed programs. Edit per scenario — “prohibited” is scenario-specific. |
 | `AI_PROMPT.txt` | The exact Step-0 paragraph printed on first run. |
 
-While a file still contains `EDIT_ME`, every module that depends on it is **skipped** —
-the script would rather do nothing than guess at your scenario.
+Before applying changes, the three required configuration files must exist and have their
+active `EDIT_ME` line removed. Comment lines may still mention it. `-ReadmeConfigured`
+confirms the review for unattended mode; it does not bypass these checks. The RDP list
+must also be edited before its group membership is changed. Audit can run before setup.
 
-## Safety guarantees (what "never lose points" means in code)
+## Safety measures and limitations
 
 - The **CyberPatriot/CCS scoring service, Defender, Firewall, Windows Update, Event Log,
   VM guest tools** and Windows core services are hard-protected; so are the account you're
@@ -128,10 +123,12 @@ git-ignored — it contains machine state and must never be committed or shared.
 No script can promise 100/100: CyberPatriot scores image-specific vulnerabilities and
 forensic answers that only a human reading *that* README can decide. This toolkit is built
 to (a) cover every recurring scored category, (b) surface the image-specific findings in
-reports instead of guessing, and (c) make every automated change reversible. It was
-syntax-validated and reviewed line-by-line, but it **must be rehearsed on practice images**
-for your exact Windows builds before you trust it under time pressure — that rehearsal is
-also how your team makes it *your* script.
+reports instead of guessing, and (c) provide backups and recovery guidance where possible.
+Rollback is partial: it does
+not restore passwords, deleted users, group membership, removed shares, software updates,
+or all registry values. Registry imports do not remove newly created values. Keep a VM
+snapshot and recover individual changes manually where necessary. Rehearse on practice
+images for your exact Windows builds before you trust it under time pressure.
 
 *Original work by the Sharon High School CyberPatriot teams 14-3178 / 15-3557. See
 `LICENSE.md`. Competition use is governed by the current CyberPatriot Rules Book.*
