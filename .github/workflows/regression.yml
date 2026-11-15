@@ -11,3 +11,24 @@ jobs:
       - name: Parse and test helpers with Windows PowerShell 5.1
         shell: powershell
         run: ./tests/regression.ps1
+      - name: Run PSScriptAnalyzer checks
+        shell: powershell
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+              Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+          }
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+              Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery | Out-Null
+          }
+          Import-Module PSScriptAnalyzer -ErrorAction Stop
+          $targets = @('secure.ps1') + @(Get-ChildItem -Path 'modules' -Filter '*.ps1' | Select-Object -ExpandProperty FullName)
+          $issues = @()
+          foreach ($t in $targets) {
+              $issues += @(Invoke-ScriptAnalyzer -Path $t -Settings '.\.PSScriptAnalyzerSettings.psd1')
+          }
+          if ($issues.Count -gt 0) {
+              $issues | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize | Out-String | Write-Host
+              throw ("PSScriptAnalyzer reported " + $issues.Count + " issue(s).")
+          }
+          Write-Host 'PSScriptAnalyzer passed with zero errors/warnings.'

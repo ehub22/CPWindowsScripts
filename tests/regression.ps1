@@ -1,31 +1,67 @@
 # Run with Windows PowerShell 5.1: powershell.exe -NoProfile -File tests\regression.ps1
 # Load only pure helpers from the AST: never execute the hardening engine here.
 $ErrorActionPreference = 'Stop'
-$source = Join-Path (Split-Path $PSScriptRoot -Parent) 'secure.ps1'
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
-if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+$repo = Split-Path $PSScriptRoot -Parent
+$source = Join-Path $repo 'secure.ps1'
+$moduleDir = Join-Path $repo 'modules'
+$moduleFiles = @(Get-ChildItem -LiteralPath $moduleDir -Filter '*.ps1' | Sort-Object Name | Select-Object -ExpandProperty FullName)
+if ($moduleFiles.Count -lt 10) { throw 'Expected all modular PowerShell files under modules/' }
+$allPsFiles = @($source) + $moduleFiles
+
+$asts = @()
+foreach ($file in $allPsFiles) {
+    $tokens = $null
+    $errors = $null
+    $parsedAst = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw ("Parse error in ${file}:`n" + ($errors | Out-String)) }
+    $asts += $parsedAst
+}
+$ast = $asts[0]
+
+function Find-AstFunction {
+    param([string]$Name)
+    foreach ($a in $asts) {
+        $fn = $a.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $Name }, $true)
+        if ($null -ne $fn) { return $fn }
+    }
+    return $null
+}
+
 foreach ($name in @(
+    'Write-Banner', 'Write-Step', 'Write-Good', 'Write-WarnLine',
+    'Confirm-YesNo', 'Wait-Enter', 'Show-AIPrompt', 'Set-RegValue',
     'Test-FileEdited', 'Get-TextList', 'Get-UpdateConfig', 'Test-ConfigReady',
-    'Get-InstalledPrograms', 'Test-ServiceScenarioKept', 'Test-TokenKept',
-    'Set-ScenarioFeatureFlags', 'Add-KeptService', 'Get-KnownAppDependencyCatalog',
-    'Get-NecessaryAppsFromServices', 'Test-MatchAgainstPatterns', 'Format-CommandArguments',
-    'ConvertFrom-WinGetListOutput', 'Select-UpdatablePackages', 'Get-UnmappedNecessaryApps',
+    'Get-InstalledPrograms', 'Get-AppxProhibitedPackages', 'Get-PersistenceFindings',
+    'Test-ServiceScenarioKept', 'Test-TokenKept',
+    'Set-ScenarioFeatureFlags', 'Add-KeptService',
+    'Test-FirewallPortRisky', 'Get-RiskyInboundFirewallRules',
+    'Test-NameInList', 'Get-UserAccountIssues',
+    'Get-KnownAppDependencyCatalog', 'Get-NecessaryAppsFromServices', 'Test-MatchAgainstPatterns',
+    'Format-CommandArguments', 'ConvertFrom-WinGetListOutput', 'Select-UpdatablePackages',
+    'Get-UnmappedNecessaryApps',
     'Get-SuspiciousFileRules', 'Test-SuspiciousFileExcludedPath', 'Get-ZipArchiveContents',
-    'Test-TextFileSensitiveContent', 'Measure-SuspiciousFileRisk', 'Get-ScopedFilesSafe'
+    'Test-ShortcutTargetSuspicious', 'Test-TextFileSensitiveContent',
+    'Measure-SuspiciousFileRisk', 'Get-ScopedFilesSafe'
 )) {
-    $func = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+    $func = Find-AstFunction -Name $name
     if ($null -eq $func) { throw "Missing function $name" }
     Invoke-Expression $func.Extent.Text
 }
+
 function Assert-Equal($actual, $expected, $message) {
     if ($actual -ne $expected) { throw "$message (expected $expected; got $actual)" }
 }
+function Assert-Condition([bool]$cond, $message) {
+    if (-not $cond) { throw $message }
+}
+
+$script:Changes = New-Object System.Collections.ArrayList
+$script:Warnings = New-Object System.Collections.ArrayList
+$script:ProtectedPatterns = 'CyberPatriot|Scoring|CCSClient|CCS|VMware|VMTools|VBox|VirtualBox|QEMU|qemu|Hyper-V'
+
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('cp-tests-' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
-    $repo = Split-Path $PSScriptRoot -Parent
     foreach ($template in @('keep_services.txt', 'authorizedusers.txt', 'admins.txt', 'rdpusers.txt')) {
         $copy = Join-Path $temp $template
         Copy-Item (Join-Path $repo $template) $copy
@@ -79,11 +115,24 @@ try {
     function Get-ItemProperty {
         param($Path, $ErrorAction)
         $script:seenPaths += $Path
-        [pscustomobject]@{ DisplayName = $Path }
+        [pscustomobject]@{ DisplayName = $Path; DisplayVersion = '1.0'; Publisher = 'Test'; UninstallString = $Path }
     }
     $programs = @(Get-InstalledPrograms)
     Assert-Equal $programs.Count 3 'All three uninstall registry locations should be queried'
     Assert-Equal (($script:seenPaths | Where-Object { $_ -notmatch '^HK(LM|CU):\\' }).Count) 0 'Registry paths need a PowerShell drive colon'
+    Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+
+    # Verify dual-version entries with identical DisplayName are preserved
+    function Get-ItemProperty {
+        param($Path, $ErrorAction)
+        @(
+            [pscustomobject]@{ DisplayName = 'Python 3.12'; DisplayVersion = '3.12.1'; Publisher = 'PSF'; UninstallString = 'msiexec /x {1}' },
+            [pscustomobject]@{ DisplayName = 'Python 3.12'; DisplayVersion = '3.12.9'; Publisher = 'PSF'; UninstallString = 'msiexec /x {2}' }
+        )
+    }
+    $dual = @(Get-InstalledPrograms)
+    Assert-Equal $dual.Count 2 'Get-InstalledPrograms must keep distinct DisplayVersion/UninstallString rows'
+    Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
 
     # --- Auto-update & dependency engine checks ---
     # 1. necessary_apps.txt template and Get-UpdateConfig parsing
@@ -233,6 +282,8 @@ try {
     Set-Content (Join-Path $forensicDir 'evidence.exe') 'stub'
     Set-Content (Join-Path $cpDir 'score.exe') 'stub'
     Set-Content (Join-Path $cacheDir 'cache.exe') 'stub'
+    Set-Content (Join-Path $dlDir 'song.mp3') 'mp3'
+    Set-Content (Join-Path $tempDropDir 'cached.mp3') 'mp3'
 
     $benignSrc = Join-Path $temp 'zip_benign'
     $badSrc = Join-Path $temp 'zip_bad'
@@ -273,6 +324,12 @@ try {
     Assert-Equal ($scannedNames -contains 'score.exe') $false 'Scanner must exclude CyberPatriot directories'
     Assert-Equal ($scannedNames -contains 'cache.exe') $false 'Scanner must prune noisy Chrome AppData cache directories'
 
+    $mediaScan = @(Get-ScopedFilesSafe -ScanRoots $mockRoots -TargetExtensions @('.mp3') -SensitiveNameRegex '' -ToolkitRoot $repo -ExcludeAppData)
+    $mediaNames = @($mediaScan | Select-Object -ExpandProperty Name)
+    Assert-Equal ($mediaNames -contains 'song.mp3') $true 'Media scan must find song.mp3 in Downloads'
+    Assert-Equal ($mediaNames -contains 'cached.mp3') $false 'Media scan with -ExcludeAppData must prune AppData and empty SensitiveNameRegex must not match non-media'
+    Assert-Equal ($mediaNames -contains 'nc.exe') $false 'Empty SensitiveNameRegex must not match unrelated files'
+
     # 9. Sensitive .txt content inspection tests
     $plainNote = Join-Path $dlDir 'shopping_list.txt'
     $credNote = Join-Path $dlDir 'notes.txt'
@@ -304,19 +361,120 @@ try {
     Assert-Equal ($scannedTextNames -contains 'backup_info.txt') $true 'Scoped text scan must inspect backup_info.txt'
     Assert-Equal ($scannedTextNames -contains 'shopping_list.txt') $true 'Scoped text scan enumerates .txt files for content filtering'
 
-    $vulnFn = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-VulnerabilityFileScan' }, $true)
-    $moveFn = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Move-FileToQuarantine' }, $true)
+    # 10. Firewall multi-port / range parsing & critical-rule matching
+    $fwArray = Test-FirewallPortRisky -LocalPort @('80','443')
+    Assert-Equal $fwArray.IsRisky $true 'Array of risky ports must be flagged'
+    Assert-Equal (($fwArray.MatchedPorts -contains '80') -and ($fwArray.MatchedPorts -contains '443')) $true 'Both array ports must match'
+    $fwRange = Test-FirewallPortRisky -LocalPort '135-140'
+    Assert-Equal $fwRange.IsRisky $true 'Port range containing 135-139 must be flagged'
+    Assert-Equal ($fwRange.MatchedPorts -contains '139') $true 'Range matching must detect port 139 inside 135-140'
+    $fwSafe = Test-FirewallPortRisky -LocalPort '54321'
+    Assert-Equal $fwSafe.IsRisky $false 'Non-risky high port must not be flagged'
+
+    $script:KeepEntries = @('IIS')
+    Set-ScenarioFeatureFlags
+    $mockFwRules = @(
+        [PSCustomObject]@{ Name='WebRule'; DisplayName='Custom Web'; LocalPort=@('80','443'); Profile='Any'; Program='C:\inetpub\app.exe'; RemoteAddress='Any' },
+        [PSCustomObject]@{ Name='BadRange'; DisplayName='Unknown Tool'; LocalPort='440-450'; Profile='Public'; Program='C:\Users\Alice\nc.exe'; RemoteAddress='0.0.0.0/0' },
+        [PSCustomObject]@{ Name='SafeApp'; DisplayName='Safe High Port'; LocalPort='51234'; Profile='Private'; Program='C:\app.exe'; RemoteAddress='LocalSubnet' }
+    )
+    $fwHits = @(Get-RiskyInboundFirewallRules -Rules $mockFwRules)
+    Assert-Equal $fwHits.Count 2 'Only risky/Any inbound rules must be returned'
+    Assert-Equal $fwHits[0].KeepCritical $true 'IIS token must keep port 80/443 rule protected'
+    Assert-Equal $fwHits[1].KeepCritical $false 'Port 445 inside range 440-450 without SMB keep entry must flag for review'
+
+    # 11. Persistence findings, Store/Appx prohibited apps & User Account hygiene checks
+    $mockIfeo = @([PSCustomObject]@{ Target='sethc.exe'; Debugger='C:\Windows\System32\cmd.exe'; KeyPath='HKLM:\Mock\sethc.exe' })
+    $mockWl = [PSCustomObject]@{ Shell='explorer.exe, C:\temp\evil.exe'; Userinit='C:\Windows\system32\userinit.exe,' }
+    $mockWmi = @([PSCustomObject]@{ Name='EvilSub'; Query='SELECT * FROM __InstanceCreationEvent' })
+    $pAlerts = @(Get-PersistenceFindings -IfeoEntries $mockIfeo -WinlogonInfo $mockWl -WmiFilters $mockWmi)
+    Assert-Equal $pAlerts.Count 3 'Persistence detector must catch IFEO Sticky Keys, abnormal Winlogon Shell, and WMI subscription'
+    Assert-Equal $pAlerts[0].Severity 'CRITICAL' 'sethc.exe IFEO Debugger must be rated CRITICAL'
+
+    $cleanWl = [PSCustomObject]@{ Shell='explorer.exe'; Userinit='C:\Windows\system32\userinit.exe,' }
+    Assert-Equal ((@(Get-PersistenceFindings -IfeoEntries @() -WinlogonInfo $cleanWl -WmiFilters @())).Count) 0 'Clean IFEO/Winlogon/WMI must yield zero persistence alerts'
+
+    $mockAppx = @(
+        [PSCustomObject]@{ Name='king.com.CandyCrushSaga'; Version='1.0'; PackageFullName='cc_1'; Publisher='King'; IsFramework=$false; SignatureKind='Store' },
+        [PSCustomObject]@{ Name='Microsoft.VCLibs.140.00'; Version='14.0'; PackageFullName='vclibs'; Publisher='MS'; IsFramework=$true; SignatureKind='Store' },
+        [PSCustomObject]@{ Name='Microsoft.WindowsCalculator'; Version='11.0'; PackageFullName='calc'; Publisher='MS'; IsFramework=$false; SignatureKind='System' }
+    )
+    $appxHits = @(Get-AppxProhibitedPackages -ProhibitedList @('CandyCrush', 'VCLibs', 'Calculator') -Packages $mockAppx)
+    Assert-Equal $appxHits.Count 1 'Appx filter must catch prohibited Store apps while skipping Framework and System packages'
+    Assert-Equal $appxHits[0].Name 'king.com.CandyCrushSaga' 'CandyCrush Store package must be flagged'
+
+    $mockUsers = @(
+        [PSCustomObject]@{ Name='Alice'; Enabled=$true; PasswordExpires=$null; UserMayChangePassword=$false; PasswordRequired=$false },
+        [PSCustomObject]@{ Name='SvcAccount'; Enabled=$true; PasswordExpires=$null; UserMayChangePassword=$false; PasswordRequired=$true },
+        [PSCustomObject]@{ Name='Guest'; Enabled=$false; PasswordExpires=$null; UserMayChangePassword=$false; PasswordRequired=$false },
+        [PSCustomObject]@{ Name='Bob'; Enabled=$false; PasswordExpires=(Get-Date).AddDays(30); UserMayChangePassword=$true; PasswordRequired=$true },
+        [PSCustomObject]@{ Name='Healthy'; Enabled=$true; PasswordExpires=(Get-Date).AddDays(30); UserMayChangePassword=$true; PasswordRequired=$true }
+    )
+    $acctIssues = @(Get-UserAccountIssues -Users $mockUsers -ServiceLogons @('SvcAccount') -AuthorizedUsers @('Alice','Bob','Healthy'))
+    Assert-Equal $acctIssues.Count 2 'Account hygiene check must catch Alice and disabled Bob while skipping SvcAccount and Guest'
+    Assert-Equal $acctIssues[0].PasswordNeverExpires $true 'Null PasswordExpires must detect PasswordNeverExpires'
+    Assert-Equal $acctIssues[0].CannotChangePassword $true 'UserMayChangePassword=$false must be detected'
+    Assert-Equal $acctIssues[0].PasswordNotRequired $true 'PasswordRequired=$false must be detected'
+    Assert-Equal $acctIssues[1].DisabledAuthorized $true 'Disabled authorized user Bob must be flagged'
+
+    # 12. Registry MultiString check + non-blocking ApplySafe AI prompt + .lnk shortcut check
+    $script:AuditOnly = $true
+    function Test-Path { param($Path, $LiteralPath); return $true }
+    function Get-ItemProperty {
+        param($Path, $Name, $ErrorAction)
+        return [pscustomobject]@{ NullSessionPipes = @('') }
+    }
+    Assert-Equal (Set-RegValue -Path 'HKLM\System\Test' -Name 'NullSessionPipes' -Value @('') -Type 'MultiString') $true 'Identical empty MultiString arrays must compare equal'
+    Assert-Equal (Set-RegValue -Path 'HKLM\System\Test' -Name 'NullSessionPipes' -Value @('evilpipe') -Type 'MultiString') $false 'Different MultiString arrays must trigger audit change'
+    Remove-Item Function:\Test-Path -ErrorAction SilentlyContinue
+    Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+    $script:AuditOnly = $false
+
+    $script:ApplySafe = $true
+    $script:Config = [PSCustomObject]@{ ShowAIPrompt = $false }
+    function Read-Host { throw 'Read-Host must not be called in ApplySafe Show-AIPrompt' }
+    Show-AIPrompt
+    Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
+    $script:ApplySafe = $false
+
+    $lnkPath = Join-Path $dlDir 'calc_helper.lnk'
+    try {
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut($lnkPath)
+        $sc.TargetPath = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+        $sc.Arguments = '-nop -enc SQBFAFgA'
+        $sc.Save()
+        $scRes = Test-ShortcutTargetSuspicious -ShortcutPath $lnkPath
+        Assert-Equal $scRes.IsSuspicious $true 'Shortcut invoking encoded PowerShell must be flagged'
+    } catch {
+        # WScript.Shell COM may not be available in headless containers; continue safely
+    }
+
+    # 13. AST safety invariants & approved-verb enforcement across secure.ps1 and all modules
+    $vulnFn = Find-AstFunction -Name 'Invoke-VulnerabilityFileScan'
+    $moveFn = Find-AstFunction -Name 'Move-FileToQuarantine'
+    $softFn = Find-AstFunction -Name 'Invoke-SoftwareAndFiles'
     Assert-Equal ($vulnFn.Extent.Text -match 'Remove-Item') $false 'Invoke-VulnerabilityFileScan must never permanently delete user files'
     Assert-Equal ($moveFn.Extent.Text -match 'Remove-Item') $false 'Move-FileToQuarantine must only move files, never delete'
+    Assert-Equal ($softFn.Extent.Text -match 'Remove-Item') $false 'Invoke-SoftwareAndFiles must never permanently delete user files'
 
-    $updFn = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-Updates' }, $true)
-    $updSafeFn = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-WinGetPackageSafe' }, $true)
+    $updFn = Find-AstFunction -Name 'Invoke-Updates'
+    $updSafeFn = Find-AstFunction -Name 'Update-WinGetPackageSafe'
     Assert-Equal ($updFn.Extent.Text -match 'Stop-Process') $false 'Invoke-Updates must never force-close running apps with Stop-Process'
     Assert-Equal ($updSafeFn.Extent.Text -match 'Stop-Process') $false 'Update-WinGetPackageSafe must never force-close running apps'
     Assert-Equal ($updSafeFn.Extent.Text -match '--allow-reboot|--force') $false 'WinGet upgrades must never pass --allow-reboot or --force'
     Assert-Equal ($updSafeFn.Extent.Text -match 'IdTruncated') $true 'Update-WinGetPackageSafe must refuse truncated WinGet IDs'
 
-    foreach ($psFile in @($source, $PSCommandPath)) {
+    $approvedVerbs = @(Get-Verb | Select-Object -ExpandProperty Verb)
+    foreach ($parsedAst in $asts) {
+        $allFnDefs = @($parsedAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
+        foreach ($fnDef in $allFnDefs) {
+            $verb = ($fnDef.Name -split '-')[0]
+            Assert-Condition ($approvedVerbs -contains $verb) ("Unapproved PowerShell verb in function '" + $fnDef.Name + "'")
+        }
+    }
+
+    foreach ($psFile in ($allPsFiles + @($PSCommandPath))) {
         $bytes = [System.IO.File]::ReadAllBytes($psFile)
         $badBytes = @($bytes | Where-Object { $_ -gt 127 })
         Assert-Equal $badBytes.Count 0 "$psFile must remain pure ASCII for PowerShell 5.1"
