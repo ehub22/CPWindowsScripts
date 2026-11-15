@@ -106,12 +106,12 @@ function Test-ShortcutTargetSuspicious {
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($ShortcutPath)
         $tgt = [string]$sc.TargetPath
-        $args = [string]$sc.Arguments
-        $combined = ($tgt + ' ' + $args).Trim()
+        $scArgs = [string]$sc.Arguments
+        $combined = ($tgt + ' ' + $scArgs).Trim()
         $rules = Get-SuspiciousFileRules
         if ([string]::IsNullOrWhiteSpace($combined)) { return $result }
         $lolRx = '(?i)(powershell|pwsh|cmd|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin)(\.exe)?$'
-        if ($tgt -match $lolRx -and $args -match '(?i)(-enc|-encodedcommand|frombase64string|downloadstring|http://|https://|\\temp\\|\\appdata\\|\\public\\|\\users\\)') {
+        if ($tgt -match $lolRx -and $scArgs -match '(?i)(-enc|-encodedcommand|frombase64string|downloadstring|http://|https://|\\temp\\|\\appdata\\|\\public\\|\\users\\)') {
             return [PSCustomObject]@{ IsSuspicious = $true; Target = $combined; Reason = 'Shortcut launches command/script host with suspicious arguments' }
         }
         if ($tgt -match $rules.HackToolRegex) {
@@ -416,28 +416,28 @@ function Get-SuspiciousFileScanRoots {
     $roots = New-Object System.Collections.ArrayList
     $seen = @{}
     function Add-ScanRoot {
-        param([string]$Path, [int]$Depth, [bool]$IsWebRoot)
+        param([string]$Path, [int]$Depth, [bool]$IsWebRoot, [string]$Toolkit = '')
         if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
-        if (Test-SuspiciousFileExcludedPath -Path $Path -ToolkitRoot $ToolkitRoot) { return }
+        if (Test-SuspiciousFileExcludedPath -Path $Path -ToolkitRoot $Toolkit) { return }
         $key = ($Path -replace '/', '\').TrimEnd('\').ToLower()
         if ($seen.ContainsKey($key)) { return }
         $seen[$key] = $true
         [void]$roots.Add([PSCustomObject]@{ Path = ($Path -replace '/', '\').TrimEnd('\'); MaxDepth = $Depth; IsWebRoot = $IsWebRoot })
     }
 
-    if (Test-Path -LiteralPath 'C:\Users') { Add-ScanRoot -Path 'C:\Users' -Depth 8 -IsWebRoot:$false }
+    if (Test-Path -LiteralPath 'C:\Users') { Add-ScanRoot -Path 'C:\Users' -Depth 8 -IsWebRoot:$false -Toolkit $ToolkitRoot }
     if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
-        Add-ScanRoot -Path (Join-Path $env:SystemRoot 'Temp') -Depth 3 -IsWebRoot:$false
+        Add-ScanRoot -Path (Join-Path $env:SystemRoot 'Temp') -Depth 3 -IsWebRoot:$false -Toolkit $ToolkitRoot
     }
     if (Test-Path -LiteralPath 'C:\inetpub\wwwroot') {
-        Add-ScanRoot -Path 'C:\inetpub\wwwroot' -Depth 5 -IsWebRoot:$true
+        Add-ScanRoot -Path 'C:\inetpub\wwwroot' -Depth 5 -IsWebRoot:$true -Toolkit $ToolkitRoot
     }
 
     try {
         foreach ($drv in @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady })) {
             $rootDir = $drv.RootDirectory.FullName.TrimEnd('\')
             # Scan immediate files in each fixed drive root
-            Add-ScanRoot -Path ($rootDir + '\') -Depth 0 -IsWebRoot:$false
+            Add-ScanRoot -Path ($rootDir + '\') -Depth 0 -IsWebRoot:$false -Toolkit $ToolkitRoot
             try {
                 foreach ($sub in @([System.IO.Directory]::GetDirectories(($rootDir + '\')))) {
                     $leaf = [System.IO.Path]::GetFileName($sub)
@@ -448,7 +448,7 @@ function Get-SuspiciousFileScanRoots {
                         $attr = [System.IO.File]::GetAttributes($sub)
                         if (($attr -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
                     } catch { continue }
-                    Add-ScanRoot -Path $sub -Depth 3 -IsWebRoot:$false
+                    Add-ScanRoot -Path $sub -Depth 3 -IsWebRoot:$false -Toolkit $ToolkitRoot
                 }
             } catch {}
         }
@@ -460,7 +460,7 @@ function Get-SuspiciousFileScanRoots {
             foreach ($sh in @(Get-SmbShare -ErrorAction SilentlyContinue)) {
                 $sp = [string]$sh.Path
                 if ([string]::IsNullOrWhiteSpace($sp) -or $sh.Name -match '^(ADMIN\$|IPC\$|[A-Z]\$|SYSVOL|NETLOGON)$') { continue }
-                Add-ScanRoot -Path $sp -Depth 5 -IsWebRoot:$false
+                Add-ScanRoot -Path $sp -Depth 5 -IsWebRoot:$false -Toolkit $ToolkitRoot
             }
         } catch {}
     }

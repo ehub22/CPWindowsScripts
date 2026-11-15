@@ -394,14 +394,12 @@ function Invoke-ProcessTriage {
             }
         }
 
-        $systemImpersonation = $false
         if ($pathLower -and $expectedSystem.ContainsKey($nameLower)) {
             $pathExpected = $false
             foreach ($fragment in @($expectedSystem[$nameLower])) {
                 if ($pathLower.EndsWith($fragment)) { $pathExpected = $true }
             }
             if (-not $pathExpected) {
-                $systemImpersonation = $true
                 Add-TriageReason $candidate 70 ("Uses a Windows system-process name but runs from an unexpected path: " + $path)
             }
         }
