@@ -1,0 +1,45 @@
+# ============================================================================
+# necessary_apps.txt  -  NECESSARY APPS AND DEPENDENCIES TO KEEP UPDATED
+# ============================================================================
+# One app name, fragment, or exact WinGet ID per line. Lines starting with #
+# are ignored. Matching is case-insensitive.
+#
+# During Step 12A (and -Mode Update), the script automatically checks and
+# updates (when already installed on this machine):
+#   1. Update & servicing dependencies (Windows Update, BITS, UsoSvc, DoSvc,
+#      CryptSvc, TrustedInstaller, msiserver, Store InstallService, AppXSvc)
+#   2. Platform & runtime dependencies (WinGet / App Installer, Visual C++
+#      Redistributables, .NET Runtimes/SDKs, Edge WebView2, Java/OpenJDK,
+#      Python, Node.js, Git, PowerShell 7, OpenSSL)
+#   3. Necessary applications listed below, derived from keep_services.txt, or
+#      present in the built-in essential-app set
+#   4. Microsoft Store apps (scan), Office Click-to-Run, PowerShell modules,
+#      and core Python pip / Node npm packaging & TLS dependencies
+#
+# SAFETY RULES:
+#   * Listing an app here NEVER installs new software from scratch - only
+#     apps and dependencies ALREADY INSTALLED on the machine are updated.
+#   * Anything matching prohibited_software.txt is NEVER updated.
+#   * Prefix a line with ! to PIN / EXCLUDE an app from auto-updating (for
+#     example: !Mozilla Firefox if the README requires a pinned version).
+#
+# --- Common essential applications ---
+Google Chrome
+Mozilla Firefox
+Microsoft Edge
+Notepad++
+Adobe Acrobat Reader
+VLC media player
+7-Zip
+LibreOffice
+Mozilla Thunderbird
+Visual Studio Code
+PuTTY
+WinSCP
+FileZilla
+GIMP
+KeePass
+KeePassXC
+Windows Terminal
+# --- Add any README-required / necessary apps below this line ---
+# --- Prefix with ! to skip updating a pinned/excluded app (e.g. !Python) ---

@@ -19,7 +19,8 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
       users/admins, prohibited software/files, required software, every "do not" sentence.
 - [ ] Open **every Forensic Question file**. Answer them now; note any you must research
       *before* hardening (file contents, hashes, user activity, deleted-file questions).
-- [ ] Fill in `keep_services.txt`, `authorizedusers.txt`, `admins.txt`, `rdpusers.txt`
+- [ ] Fill in `keep_services.txt`, `authorizedusers.txt`, `admins.txt`, `rdpusers.txt`,
+      and (if the README names specific required apps or version pins) `necessary_apps.txt`
       from the README; delete each `EDIT_ME` line. The `AI_PROMPT.txt`
       paragraph can help generate these lists — verify them by eye, line by line.
 - [ ] Optional but smart: `secure.bat -Mode Audit` and skim `Reports\…\recon.txt` —
@@ -53,11 +54,14 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] **Domain controllers:** set domain password/lockout policy in the *Default Domain
       Policy* GPO (`gpmc.msc`) — local policy alone may not score. Review AD users,
       Domain Admins / Enterprise Admins, DNS zones, and DHCP scopes against the README.
-- [ ] **Browsers & apps:** Step 12A auto-checks/updates the curated WinGet set; still update
-      any app the README specifically names from Help → About, and **normally close/reopen
-      browsers after their updates** (running copies keep the old version). Check
-      `Reports\…\app-updates.txt` and `app-versions.txt`. Remove browser toolbars/
-      extensions nobody can justify. **Never disable JavaScript** — the Scoring Report needs it.
+- [ ] **Browsers, apps & dependencies:** Step 12A (or `secure.bat -Mode Update`) repairs
+      updater services/tasks/policies, updates runtime dependencies first, updates
+      curated/listed necessary apps (respecting `!` pins and `prohibited_software.txt`),
+      and checks Store/PowerShell/`pip`/`npm`/`.NET`. Still update any unmapped app listed
+      in `app-updates.txt` from Help → About, and **normally close/reopen browsers after
+      their updates** (running copies keep the old version). Check `Reports\…\dependency-updates.txt`,
+      `app-updates.txt`, and `app-versions.txt`. Remove browser toolbars/extensions nobody
+      can justify. **Never disable JavaScript** — the Scoring Report needs it.
 - [ ] **IIS/FTP/DNS/DHCP/SMB/print/SSH/WinRM/SNMP/SQL that ARE critical:** Step 9C already
       hardens them in place and protects everything they depend on; finish the inside jobs it
       deliberately won't force (FTP: FTPS cert, no anonymous writes; IIS: remove sample
@@ -75,10 +79,13 @@ human decisions. Work this list top to bottom. Times assume the current **4-hour
 - [ ] **Per-user settings** (screensaver lock/timeout, Office macro policy, browser
       settings for *other* users): set via `gpedit.msc` User Configuration when the
       README points at user behavior; machine policy can't cover every profile.
-- [ ] **Running malware/backdoors:** check Step 7B's `suspicious-processes.csv` and
-      Defender Protection history. The script only directly stops evidence-backed,
-      non-service processes under its thresholds; finish the job by removing the
-      matching persistence (service/task/Run/WMI/startup entry) one item at a time.
+- [ ] **Running malware/backdoors & suspicious files:** check Step 7B's
+      `suspicious-processes.csv`, Step 11's `suspicious-files.csv` / `suspicious-files.txt`
+      (automatic scan of `.exe`, scripts, `.zip` archive contents, double extensions,
+      `.txt` files containing plaintext passwords/keys/tokens/PII, and credential dumps
+      across user profiles, drive roots, Temp, Startup, webroots, and shares),
+      and Defender Protection history. Finish the job by removing matching persistence
+      (service/task/Run/WMI/startup entry) one item at a time.
 - [ ] **Persistence sweep by eye:** walk `recon.txt` — unknown listening ports,
       scheduled-task *actions*, Run/RunOnce values, Startup folders, IFEO `Debugger`
       values (Sticky-Keys backdoor), `Winlogon Shell/Userinit`, WMI subscriptions,
