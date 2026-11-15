@@ -6,6 +6,7 @@ rem  This launcher prints the critical-services AI paragraph FIRST (once per
 rem  fresh copy of this folder), then hands over to PowerShell, which asks
 rem  for elevation itself if needed. Extra arguments are passed through, e.g.
 rem    secure.bat -Mode Audit
+rem    secure.bat -Mode Update
 rem    secure.bat -Rollback
 rem ============================================================================
 color 0b
@@ -13,7 +14,10 @@ title CyberPatriot Windows Script (2026)
 setlocal
 cd /d "%~dp0"
 set "UNATTENDED="
-for %%A in (%*) do if /I "%%~A"=="ApplySafe" set "UNATTENDED=1"
+for %%A in (%*) do (
+    if /I "%%~A"=="ApplySafe" set "UNATTENDED=1"
+    if /I "%%~A"=="Update" set "UNATTENDED=1"
+)
 
 if not exist "%~dp0.ai_prompt_acknowledged" goto :showprompt
 goto :launch
