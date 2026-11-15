@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-    CyberPatriot Windows hardening for training images (Windows 10 / 11 and
+    CyberPatriot Windows hardening for Windows images (Windows 10 / 11 and
     Windows Server 2019 / 2022 / 2025), audit-first and penalty-averse.
 
 .DESCRIPTION
     Design rules of this script (in priority order):
       1. NEVER lose points: forensics gate first, README-driven allow-lists,
          the scoring service / VM tools / current user / service accounts /
-         domain controllers are hard-protected, every change is backed up
-         first, nothing is deleted silently, and the script never reboots.
+         domain controllers are hard-protected, core backups precede changes,
+         nothing is deleted silently, and the script never reboots. Rollback
+         is partial; keep a VM snapshot and review the README recovery limits.
       2. Gain points: applies the controls CyberPatriot scores (users,
          password + lockout policy, security options, audit policy,
          firewall, Defender, insecure services, remote access, SMB,
@@ -16,12 +17,6 @@
          with CIS Benchmarks and current Microsoft security baselines.
       3. Be transparent: -Mode Audit changes nothing, everything is logged,
          and docs/RESEARCH_AND_SAFETY.md explains every single fix.
-
-    RULES WARNING: Competition rules change every season and restrict AI
-    tools, AI-made scripts and pre-written scripts in scored rounds and at
-    National Finals. Read the CURRENT CyberPatriot Rules Book and treat
-    this toolkit as TRAINING material that your own team must understand,
-    test on practice images, and re-author as required by those rules.
 
 .EXAMPLE
     .\secure.ps1 -Mode Audit        (read-only: reports + pass/fail table)
@@ -74,6 +69,7 @@ $script:DomainJoined = $false
 $script:OSCaption = 'Unknown Windows'
 $script:TeamPassword = $null
 $script:KeepEntries = @()
+$script:KeptByChoice = New-Object System.Collections.ArrayList
 $script:AuthorizedUsers = @()
 $script:AuthorizedAdmins = @()
 $script:RdpUsers = @()
@@ -164,10 +160,17 @@ function Get-TextList {
 
 function Test-FileEdited {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return $false }
-    $raw = Get-Content $Path -Raw -ErrorAction SilentlyContinue
-    if ($null -eq $raw) { return $false }
-    return ($raw -notmatch 'EDIT_ME')
+    # Only an active marker counts. Instructions in comment lines deliberately
+    # mention EDIT_ME and must not prevent a completed file from being used.
+    try {
+        $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop)
+        foreach ($line in $lines) {
+            $text = $line.Trim()
+            if (-not $text -or $text.StartsWith('#')) { continue }
+            if ($text -ieq 'EDIT_ME') { return $false }
+        }
+        return $true
+    } catch { return $false }
 }
 
 function Add-Report {
@@ -335,6 +338,16 @@ function Test-TokenKept {
     return $false
 }
 
+function Set-ScenarioFeatureFlags {
+    # A service name or display name is as valid as a scenario keyword.
+    $script:FileSharingCritical = (Test-TokenKept @('SMB','FILES','FILE','SHARES')) -or
+        (Test-ServiceScenarioKept -Name 'LanmanServer' -DisplayName 'Server')
+    $script:RdpCritical = (Test-TokenKept @('RDP','REMOTEDESKTOP','REMOTE DESKTOP','REMOTE')) -or
+        (Test-ServiceScenarioKept -Name 'TermService' -DisplayName 'Remote Desktop Services') -or
+        (Test-ServiceScenarioKept -Name 'UmRdpService' -DisplayName 'Remote Desktop Services UserMode Port Redirector') -or
+        (Test-ServiceScenarioKept -Name 'SessionEnv' -DisplayName 'Remote Desktop Configuration')
+}
+
 # ----------------------------------------------------------------------------
 # Service dependency graph: dependencies are NEVER removed.
 # Test-ServiceKeptDirect = protected core services + scenario-kept services.
@@ -498,7 +511,7 @@ function Get-BlockingDependents {
 }
 
 # ----------------------------------------------------------------------------
-# AI paragraph (printed FIRST, as requested) + rules warning
+# AI paragraph (printed on first run)
 # ----------------------------------------------------------------------------
 function Show-AIPrompt {
     $marker = Join-Path $script:Root '.ai_prompt_acknowledged'
@@ -508,18 +521,11 @@ function Show-AIPrompt {
     Write-Host 'LOSES points. Before this script touches anything, identify the critical' -ForegroundColor Yellow
     Write-Host 'services from the README that sits on the image desktop.'
     Write-Host ''
-    Write-Host 'TRAINING HELP: the paragraph between the lines below is a prompt for an' -ForegroundColor Yellow
+    Write-Host 'The paragraph between the lines below is a prompt for an' -ForegroundColor Yellow
     Write-Host 'AI model. Copy it, then paste the image README immediately after it.' -ForegroundColor Yellow
     Write-Host 'It also lives in AI_PROMPT.txt next to this script. Paste the AI output' -ForegroundColor Yellow
     Write-Host 'into keep_services.txt / authorizedusers.txt / admins.txt / rdpusers.txt' -ForegroundColor Yellow
     Write-Host 'and then VERIFY EVERY LINE YOURSELF against the original README.' -ForegroundColor Yellow
-    Write-Host ''
-    Write-Host 'RULES WARNING: current CyberPatriot rules restrict using AI tools and' -ForegroundColor Red
-    Write-Host 'AI-made scripts DURING scored competition rounds (paid AI tools may be' -ForegroundColor Red
-    Write-Host 'banned in connection with the competition entirely). Use this prompt for' -ForegroundColor Red
-    Write-Host 'TRAINING and practice images only, and always follow the CURRENT Rules' -ForegroundColor Red
-    Write-Host 'Book. In a scored round, do the same job by hand: read the README, fill' -ForegroundColor Red
-    Write-Host 'in the same four .txt files yourself. The script protects whatever you list.' -ForegroundColor Red
     Write-Host ''
     Write-Host '------------------------- COPY FROM HERE -------------------------' -ForegroundColor White
     $promptFile = Join-Path $script:Root 'AI_PROMPT.txt'
@@ -542,7 +548,13 @@ function Invoke-Rollback {
     Write-Banner 'ROLLBACK - restore a previous backup'
     $base = Join-Path $script:Root 'Backups'
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        $dirs = @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+        $dirs = @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | Where-Object {
+            -not (Test-Path (Join-Path $_.FullName 'backup-incomplete')) -and
+            (Test-Path (Join-Path $_.FullName 'secedit-backup.cfg')) -and
+            (Test-Path (Join-Path $_.FullName 'auditpol-backup.csv')) -and
+            (Test-Path (Join-Path $_.FullName 'firewall-backup.wfw')) -and
+            (Test-Path (Join-Path $_.FullName 'services-backup.csv'))
+        } | Sort-Object Name -Descending)
         if ($dirs.Count -eq 0) { Write-WarnLine 'No backups found.'; return }
         $Path = $dirs[0].FullName
     }
@@ -555,6 +567,7 @@ function Invoke-Rollback {
             try {
                 $db = Join-Path $env:TEMP 'cp-rollback.sdb'
                 & secedit.exe /configure /db $db /cfg $cfg /areas SECURITYPOLICY /quiet | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw ('secedit exit code ' + $LASTEXITCODE) }
                 Write-Good 'Restored security policy from backup.'
             } catch { Write-WarnLine ("secedit restore failed: " + $_.Exception.Message) }
         }
@@ -562,14 +575,14 @@ function Invoke-Rollback {
     $audit = Join-Path $Path 'auditpol-backup.csv'
     if (Test-Path $audit) {
         if (Ask-YesNo 'Restore audit policy from backup (auditpol)?' $true) {
-            try { & auditpol.exe /restore "/file:$audit" | Out-Null; Write-Good 'Restored audit policy from backup.' }
+            try { & auditpol.exe /restore "/file:$audit" | Out-Null; if ($LASTEXITCODE -ne 0) { throw ('auditpol exit code ' + $LASTEXITCODE) }; Write-Good 'Restored audit policy from backup.' }
             catch { Write-WarnLine ("auditpol restore failed: " + $_.Exception.Message) }
         }
     }
     $fw = Join-Path $Path 'firewall-backup.wfw'
     if (Test-Path $fw) {
         if (Ask-YesNo 'Restore Windows Firewall policy from backup?' $true) {
-            try { & netsh.exe advfirewall import $fw | Out-Null; Write-Good 'Restored firewall policy from backup.' }
+            try { & netsh.exe advfirewall import $fw | Out-Null; if ($LASTEXITCODE -ne 0) { throw ('netsh exit code ' + $LASTEXITCODE) }; Write-Good 'Restored firewall policy from backup.' }
             catch { Write-WarnLine ("Firewall restore failed: " + $_.Exception.Message) }
         }
     }
@@ -589,7 +602,7 @@ function Invoke-Rollback {
     }
     foreach ($reg in @(Get-ChildItem $Path -Filter '*.reg' -ErrorAction SilentlyContinue)) {
         if (Ask-YesNo ("Import registry backup " + $reg.Name + '?') $false) {
-            try { & reg.exe import $reg.FullName | Out-Null; Write-Good ("Imported " + $reg.Name) }
+            try { & reg.exe import $reg.FullName | Out-Null; if ($LASTEXITCODE -ne 0) { throw ('reg exit code ' + $LASTEXITCODE) }; Write-Good ("Imported " + $reg.Name) }
             catch { Write-WarnLine ("Registry import failed for " + $reg.Name) }
         }
     }
@@ -619,6 +632,11 @@ function Invoke-Preflight {
                 $elevArgs = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Mode ' + $Mode + ' -NoElevate'
                 if ($ForensicsDone) { $elevArgs += ' -ForensicsDone' }
                 if ($ReadmeConfigured) { $elevArgs += ' -ReadmeConfigured' }
+                if ($ShowAIPrompt) { $elevArgs += ' -ShowAIPrompt' }
+                # Preserve tuned policy values when UAC launches the elevated copy.
+                foreach ($name in @('MinPasswordLength','PasswordHistorySize','MaxPasswordAgeDays','MinPasswordAgeDays','LockoutThreshold','LockoutDurationMin','LockoutResetMin')) {
+                    $elevArgs += ' -' + $name + ' ' + (Get-Variable -Name $name -ValueOnly)
+                }
                 Start-Process powershell.exe -ArgumentList $elevArgs -WorkingDirectory $script:Root -Verb RunAs
                 return $false
             } catch { Write-WarnLine ("Elevation failed: " + $_.Exception.Message) }
@@ -629,13 +647,14 @@ function Invoke-Preflight {
     Write-Good 'Running as Administrator.'
 
     try {
-        $os = Get-CimInstance Win32_OperatingSystem
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
         $script:OSCaption = $os.Caption
         $build = $os.BuildNumber
         $productType = $os.ProductType  # 1=workstation, 2=domain controller, 3=server
+        if ($productType -notin @(1,2,3)) { throw 'Unknown Windows product type.' }
         $script:IsServer = ($productType -ne 1)
         if ($productType -eq 2) { $script:IsDC = $true }
-        $cs = Get-CimInstance Win32_ComputerSystem
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
         $script:DomainJoined = [bool]$cs.PartofDomain
         Write-Step ("OS: " + $script:OSCaption + "  build " + $build)
         $role = 'Workstation'
@@ -647,7 +666,7 @@ function Invoke-Preflight {
             Write-WarnLine 'Domain Controller detected: NO domain users will be created/deleted by'
             Write-WarnLine 'this script (report only), and AD/DNS/Kerberos services are protected.'
         }
-    } catch { Write-WarnLine 'Could not fully detect the OS role; continuing carefully.' }
+    } catch { Write-WarnLine 'Could not detect the OS role safely; stopping before hardening.'; return $false }
 
     $scoreSvcs = @(Get-Service -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -match $script:ProtectedPatterns -or $_.DisplayName -match $script:ProtectedPatterns
@@ -667,8 +686,7 @@ function Invoke-Preflight {
     $script:AuthorizedUsers = @(Get-TextList (Join-Path $script:Root 'authorizedusers.txt') | Where-Object { $_ -ne 'EDIT_ME' })
     $script:AuthorizedAdmins = @(Get-TextList (Join-Path $script:Root 'admins.txt') | Where-Object { $_ -ne 'EDIT_ME' })
     $script:RdpUsers = @(Get-TextList (Join-Path $script:Root 'rdpusers.txt') | Where-Object { $_ -ne 'EDIT_ME' })
-    $script:FileSharingCritical = Test-TokenKept @('SMB','FILES','FILE','SHARES')
-    $script:RdpCritical = Test-TokenKept @('RDP','REMOTEDESKTOP','REMOTE DESKTOP','REMOTE')
+    Set-ScenarioFeatureFlags
 
     if ($script:AuditOnly) {
         Write-Step 'Mode = Audit: every module runs as a read-only dry-run; nothing is changed.'
@@ -700,18 +718,17 @@ function Invoke-Preflight {
     if (-not (Test-FileEdited $keepFile)) { $unedited += 'keep_services.txt' }
     if (-not (Test-FileEdited $usersFile)) { $unedited += 'authorizedusers.txt' }
     if (-not (Test-FileEdited $adminsFile)) { $unedited += 'admins.txt' }
-    if ($unedited.Count -gt 0 -and -not $ReadmeConfigured) {
-        Write-WarnLine ("These files still contain EDIT_ME (not yet filled in from the README): " + ($unedited -join ', '))
-        Write-WarnLine 'Modules that depend on them will be SKIPPED (services, users, groups,'
-        Write-WarnLine 'remote desktop hardening). Safe modules can still run.'
+    if ($unedited.Count -gt 0) {
+        Write-WarnLine ("Missing, unreadable, or unedited configuration: " + ($unedited -join ', '))
+        Write-WarnLine 'Complete these files before applying changes; -ReadmeConfigured does not bypass the file checks.'
+        return $false
     }
 
     $script:KeepEntries = @(Get-TextList $keepFile | Where-Object { $_ -ne 'EDIT_ME' })
     $script:AuthorizedUsers = @(Get-TextList $usersFile | Where-Object { $_ -ne 'EDIT_ME' })
     $script:AuthorizedAdmins = @(Get-TextList $adminsFile | Where-Object { $_ -ne 'EDIT_ME' })
     $script:RdpUsers = @(Get-TextList (Join-Path $script:Root 'rdpusers.txt') | Where-Object { $_ -ne 'EDIT_ME' })
-    $script:FileSharingCritical = Test-TokenKept @('SMB','FILES','FILE','SHARES')
-    $script:RdpCritical = Test-TokenKept @('RDP','REMOTEDESKTOP','REMOTE DESKTOP','REMOTE')
+    Set-ScenarioFeatureFlags
     Write-Step ("Critical-service entries loaded: " + ($script:KeepEntries -join ', '))
     if ($script:FileSharingCritical) { Write-Step 'File sharing (SMB) is marked critical - server service and shares are protected.' }
     if ($script:RdpCritical) { Write-Step 'Remote Desktop is marked critical - it will be SECURED, not disabled.' }
@@ -720,7 +737,6 @@ function Invoke-Preflight {
 
 function Test-ConfigReady {
     # True when the README-driven files have actually been edited.
-    if ($ReadmeConfigured) { return $true }
     $ok = (Test-FileEdited (Join-Path $script:Root 'keep_services.txt')) -and
           (Test-FileEdited (Join-Path $script:Root 'authorizedusers.txt')) -and
           (Test-FileEdited (Join-Path $script:Root 'admins.txt'))
@@ -732,16 +748,26 @@ function Test-ConfigReady {
 # ----------------------------------------------------------------------------
 function Invoke-Backup {
     if ($script:AuditOnly) { return }
-    Write-Banner 'STEP 2 OF 12 - BACKUP (everything changed is backed up first)'
-    if (-not (Test-Path $script:BackupDir)) { New-Item -ItemType Directory -Path $script:BackupDir -Force | Out-Null }
+    Write-Banner 'STEP 2 OF 12 - BACKUP (core system state)'
+    New-Item -ItemType Directory -Path $script:BackupDir -Force -ErrorAction Stop | Out-Null
     Write-Step ("Backup folder: " + $script:BackupDir)
-    try { & secedit.exe /export /cfg (Join-Path $script:BackupDir 'secedit-backup.cfg') /quiet | Out-Null } catch {}
-    try { $auditFile = Join-Path $script:BackupDir 'auditpol-backup.csv'; & auditpol.exe /backup "/file:$auditFile" | Out-Null } catch {}
-    try { & netsh.exe advfirewall export (Join-Path $script:BackupDir 'firewall-backup.wfw') | Out-Null } catch {}
-    try {
-        Get-Service | Select-Object 'Name','DisplayName','Status','StartType' |
-            Export-Csv (Join-Path $script:BackupDir 'services-backup.csv') -NoTypeInformation
-    } catch {}
+    $incomplete = Join-Path $script:BackupDir 'backup-incomplete'
+    Set-Content -LiteralPath $incomplete -Value 'Backup in progress' -ErrorAction Stop
+    # Native executables do not throw on nonzero exit codes in Windows PowerShell.
+    # Never proceed with changes if any of the core exports failed.
+    $cfgFile = Join-Path $script:BackupDir 'secedit-backup.cfg'
+    & secedit.exe /export /cfg $cfgFile /quiet | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cfgFile)) { throw 'Security policy backup failed.' }
+    $auditFile = Join-Path $script:BackupDir 'auditpol-backup.csv'
+    & auditpol.exe /backup "/file:$auditFile" | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $auditFile)) { throw 'Audit policy backup failed.' }
+    $firewallFile = Join-Path $script:BackupDir 'firewall-backup.wfw'
+    & netsh.exe advfirewall export $firewallFile | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $firewallFile)) { throw 'Firewall backup failed.' }
+    $servicesFile = Join-Path $script:BackupDir 'services-backup.csv'
+    $services = @(Get-Service -ErrorAction Stop | Select-Object 'Name','DisplayName','Status','StartType')
+    if ($services.Count -eq 0) { throw 'Service inventory is empty; backup failed.' }
+    $services | Export-Csv $servicesFile -NoTypeInformation -ErrorAction Stop
     Export-RegKey 'HKLM\SOFTWARE\Policies\Microsoft\Windows' (Join-Path $script:BackupDir 'reg-policies-windows.reg')
     Export-RegKey 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa' (Join-Path $script:BackupDir 'reg-lsa.reg')
     Export-RegKey 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' (Join-Path $script:BackupDir 'reg-lanmanserver.reg')
@@ -763,7 +789,8 @@ function Invoke-Backup {
     if (Test-Path $lgpo) {
         try { & $lgpo /b $script:BackupDir /n 'CP-Backup' | Out-Null } catch {}
     }
-    Write-Good 'Backup complete. Undo everything later with: .\secure.ps1 -Rollback'
+    Remove-Item -LiteralPath $incomplete -ErrorAction Stop
+    Write-Good 'Core backups complete. Rollback is partial; retain a VM snapshot and review the recovery guidance.'
 }
 
 # ----------------------------------------------------------------------------
@@ -771,9 +798,9 @@ function Invoke-Backup {
 # ----------------------------------------------------------------------------
 function Get-InstalledPrograms {
     $keys = @(
-        'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )
     $apps = @()
     foreach ($k in $keys) {
@@ -956,6 +983,7 @@ function Invoke-Passwords {
         Write-WarnLine 'with Active Directory Users and Computers, guided by the README.'
         return
     }
+    if ($script:ApplySafe) { Write-Step 'Password changes require an interactive run; skipping in ApplySafe.'; return }
     if (-not (Ask-YesNo 'Change passwords for authorized local users (NOT you, not built-ins, not service accounts)?' $true)) { return }
     if ($script:AuditOnly) {
         $auditLogons = @(Get-ServiceLogonAccounts)
@@ -3237,7 +3265,7 @@ function Invoke-Shares {
         }
         $kept = $script:FileSharingCritical
         foreach ($k in $script:KeepEntries) { if ($k.Length -ge 3 -and $share.Name.ToLower().Contains($k.ToLower())) { $kept = $true } }
-        if ($script:AuditOnly) { continue }
+        if ($script:AuditOnly -or $script:ApplySafe) { continue }
         if ($kept) {
             if ($everyoneOpen) {
                 if (Ask-YesNo ("  Share '" + $share.Name + "' is critical but Everyone/Full. Revoke Everyone from it (share itself stays)?") $false) {
@@ -3336,7 +3364,10 @@ function Invoke-UsersAndGroups {
     Write-Host ("Authorized users missing   : " + ($missing -join ', '))
     Write-Host ("Unauthorized admins        : " + (@($unauthAdmins | Select-Object -ExpandProperty Full) -join ', '))
     Write-Host ("Authorized admins missing  : " + ($missingAdmins -join ', '))
-    if ($script:AuditOnly) { return }
+    if ($script:AuditOnly -or $script:ApplySafe) {
+        if ($script:ApplySafe) { Write-Step 'Account and group changes require interactive review; skipping in ApplySafe.' }
+        return
+    }
 
     foreach ($name in $missing) {
         if (Ask-YesNo ("Create missing authorized user '" + $name + "'?") $true) {
@@ -3344,8 +3375,8 @@ function Invoke-UsersAndGroups {
                 if ($null -ne $script:TeamPassword) {
                     New-LocalUser -Name $name -Password $script:TeamPassword -PasswordNeverExpires:$false -ErrorAction Stop | Out-Null
                 } else {
-                    New-LocalUser -Name $name -NoPassword -ErrorAction Stop | Out-Null
-                    Write-WarnLine ("Created " + $name + " with NO password because the password step was skipped - set one now by hand.")
+                    Write-WarnLine ("Skipping creation of " + $name + ': no team password was provided.')
+                    continue
                 }
                 Add-LocalGroupMember -Group 'Users' -Member $name -ErrorAction SilentlyContinue
                 Write-Good ("Created user " + $name)
@@ -4042,9 +4073,7 @@ function Invoke-Verification {
 # ----------------------------------------------------------------------------
 function Invoke-Main {
     Write-Banner 'CyberPatriot Windows Hardening - 2026 edition (Windows 10/11, Server 2019/2022/2025)'
-    Write-Host 'Audit-first, backup-always, never-auto-reboot. Rules change every season:'
-    Write-Host 'this is TRAINING material for your own team - verify what the CURRENT'
-    Write-Host 'Rules Book allows before using any script or AI tool in a scored round.'
+    Write-Host 'Audit-first, backup-always, never-auto-reboot.'
     Show-AIPrompt
 
     if ($Rollback) {
@@ -4084,7 +4113,7 @@ function Invoke-Main {
         }
         Invoke-Verification
         Write-Host ''
-        Write-Host 'Audit complete. NO settings were changed. Reports are in the Reports folder.'
+        Write-Host 'Audit complete. No system settings were changed. Reports and logs were written locally.'
         return
     }
 
@@ -4094,8 +4123,11 @@ function Invoke-Main {
         return
     }
 
+    try { Invoke-Backup } catch {
+        Write-WarnLine ("Backup failed; stopping before hardening: " + $_.Exception.Message)
+        return
+    }
     try {
-        Invoke-Backup
         Invoke-Recon
         Invoke-Passwords
         Invoke-AccountPolicy
