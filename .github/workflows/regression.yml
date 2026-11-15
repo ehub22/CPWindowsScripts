@@ -10,7 +10,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Parse and test helpers with Windows PowerShell 5.1
         shell: powershell
-        run: ./tests/regression.ps1
+        run: |
+          try {
+              ./tests/regression.ps1
+          } catch {
+              $errLine = $_.InvocationInfo.ScriptLineNumber
+              $errFile = $_.InvocationInfo.ScriptName
+              $msg = $_.Exception.Message -replace "`r|`n", ' '
+              Write-Host "::error file=$errFile,line=$errLine::$msg"
+              throw
+          }
       - name: Run PSScriptAnalyzer checks
         shell: powershell
         run: |
@@ -28,6 +37,10 @@ jobs:
               $issues += @(Invoke-ScriptAnalyzer -Path $t -Settings '.\.PSScriptAnalyzerSettings.psd1')
           }
           if ($issues.Count -gt 0) {
+              foreach ($iss in $issues) {
+                  $msg = ("[$($iss.Severity) $($iss.RuleName)] $($iss.Message)") -replace "`r|`n", ' '
+                  Write-Host "::error file=$($iss.ScriptPath),line=$($iss.Line)::$msg"
+              }
               $issues | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize | Out-String | Write-Host
               throw ("PSScriptAnalyzer reported " + $issues.Count + " issue(s).")
           }
