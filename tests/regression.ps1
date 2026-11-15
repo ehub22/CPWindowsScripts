@@ -27,6 +27,8 @@ try {
     }
     $script:Root = $temp
     $path = Join-Path $temp 'keep_services.txt'
+    Remove-Item -LiteralPath $path
+    Assert-Equal (Test-Path -LiteralPath $path) $false 'Missing-file test fixture must not exist'
     Assert-Equal (Test-FileEdited $path) $false 'Missing files must fail closed'
     Set-Content $path @('# Delete the EDIT_ME line', '  EDIT_ME  ')
     Assert-Equal (Test-FileEdited $path) $false 'Active marker must block configuration'
