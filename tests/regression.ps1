@@ -375,13 +375,13 @@ try {
     Set-ScenarioFeatureFlags
     $mockFwRules = @(
         [PSCustomObject]@{ Name='WebRule'; DisplayName='Custom Web'; LocalPort=@('80','443'); Profile='Any'; Program='C:\inetpub\app.exe'; RemoteAddress='Any' },
-        [PSCustomObject]@{ Name='BadRange'; DisplayName='Unknown Tool'; LocalPort='440-450'; Profile='Public'; Program='C:\Users\Alice\nc.exe'; RemoteAddress='0.0.0.0/0' },
+        [PSCustomObject]@{ Name='BadRange'; DisplayName='Unknown Tool'; LocalPort='444-450'; Profile='Public'; Program='C:\Users\Alice\nc.exe'; RemoteAddress='0.0.0.0/0' },
         [PSCustomObject]@{ Name='SafeApp'; DisplayName='Safe High Port'; LocalPort='51234'; Profile='Private'; Program='C:\app.exe'; RemoteAddress='LocalSubnet' }
     )
     $fwHits = @(Get-RiskyInboundFirewallRules -Rules $mockFwRules)
     Assert-Equal $fwHits.Count 2 'Only risky/Any inbound rules must be returned'
     Assert-Equal $fwHits[0].KeepCritical $true 'IIS token must keep port 80/443 rule protected'
-    Assert-Equal $fwHits[1].KeepCritical $false 'Port 445 inside range 440-450 without SMB keep entry must flag for review'
+    Assert-Equal $fwHits[1].KeepCritical $false 'Port 445 inside range 444-450 without SMB keep entry must flag for review'
 
     # 11. Persistence findings, Store/Appx prohibited apps & User Account hygiene checks
     $mockIfeo = @([PSCustomObject]@{ Target='sethc.exe'; Debugger='C:\Windows\System32\cmd.exe'; KeyPath='HKLM:\Mock\sethc.exe' })
