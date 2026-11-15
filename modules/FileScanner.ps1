@@ -490,7 +490,7 @@ function Get-ScopedFilesSafe {
         $cur = $stack.Pop()
         $dirPath = [string]$cur.Dir
         if (Test-SuspiciousFileExcludedPath -Path $dirPath -ToolkitRoot $ToolkitRoot) { continue }
-        if ($ExcludeAppData -and ($dirPath -imatch '\\AppData($|\\)')) { continue }
+        if ($ExcludeAppData -and ([System.IO.Path]::GetFileName($dirPath.TrimEnd('\')) -ieq 'AppData')) { continue }
         $searchDir = $dirPath
         if ($searchDir -match '^[A-Za-z]:$') { $searchDir = $searchDir + '\' }
 
@@ -525,7 +525,7 @@ function Get-ScopedFilesSafe {
         try {
             foreach ($sub in @([System.IO.Directory]::GetDirectories($searchDir))) {
                 if (Test-SuspiciousFileExcludedPath -Path $sub -ToolkitRoot $ToolkitRoot) { continue }
-                if ($ExcludeAppData -and ($sub -imatch '\\AppData($|\\)')) { continue }
+                if ($ExcludeAppData -and ([System.IO.Path]::GetFileName($sub.TrimEnd('\')) -ieq 'AppData')) { continue }
                 try {
                     $attr = [System.IO.File]::GetAttributes($sub)
                     if (($attr -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
